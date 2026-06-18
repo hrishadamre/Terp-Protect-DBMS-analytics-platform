@@ -10,3 +10,4 @@ jupyter
 matplotlib
 scikit-learn
 python-dotenv
+tabulate
