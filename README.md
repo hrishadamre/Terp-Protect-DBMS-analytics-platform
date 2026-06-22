@@ -233,33 +233,6 @@ streamlit run dashboard/streamlit_app/app.py
 - VS Code
 - Git and GitHub
 - Power BI, planned as a later reporting layer
-## Current Status
-Completed:
-- Project folder structure
-- Data source inventory
-- Data dictionary
-- UMPD Daily Crime and Incident Log scraper
-- Raw 2025 incident dataset
-- Cleaning and standardization pipeline
-- SQLite database schema
-- Database loading pipeline
-- SQL views and business questions
-- SQL analysis summary outputs
-- Dashboard-ready CSV exports
-- Multi-tab Streamlit dashboard
-In progress:
-- UI refinement
-- GitHub documentation polish
-- Streamlit dashboard improvements
-Planned next:
-- Add Arrest Logs
-- Match incident records to arrest records using UMPD case number
-- Add incident-to-arrest conversion analysis
-- Add Campus Security Authority Logs
-- Add Uniform Crime Reports
-- Add forecasting after multi-year data is collected
-- Add charge text classification after Arrest Logs are integrated
-- Add Power BI dashboard as an optional reporting layer
 ## Notes on Data and Ethics
 This project uses public records for educational and analytical purposes. It does not attempt to predict individual behavior, assign risk to individuals, or make enforcement decisions.
 Future predictive work, if included, will focus only on aggregate-level reporting support, administrative outcome classification, incident volume forecasting, or charge text categorization.
