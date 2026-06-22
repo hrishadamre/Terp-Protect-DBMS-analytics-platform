@@ -11,3 +11,5 @@ matplotlib
 scikit-learn
 python-dotenv
 tabulate
+streamlit
+plotly
