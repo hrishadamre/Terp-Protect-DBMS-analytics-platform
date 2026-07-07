@@ -1,6 +1,6 @@
 /*
 Terp Protect DBMS
-File: 03_business_questions.sql
+
 Purpose:
 Answer core business and analytical questions using the Terp Protect incident analytics database.
 Current Scope:

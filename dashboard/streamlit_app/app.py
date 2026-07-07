@@ -5,18 +5,18 @@ Purpose:
 Build the Streamlit dashboard for the Terp Protect campus safety analytics project.
 
 Current Scope:
-- Source: UMPD Daily Crime and Incident Logs
-- Year: 2025
-- Input File: dashboard/powerbi/data/incident_detail.csv
+- UMPD Daily Crime and Incident Logs: 2025
+- UMPD Arrest Logs: 2025
+
+Input Files:
+- dashboard/powerbi/data/incident_detail.csv
+- dashboard/powerbi/data/arrest_detail.csv
+- dashboard/powerbi/data/incident_arrest_match.csv
+- dashboard/powerbi/data/charge_category_summary.csv
+- dashboard/powerbi/data/demographic_summary.csv
 
 Current App Version:
-Version 2 includes multiple dashboard tabs:
-1. Executive Overview
-2. Incident Trends
-3. Incident Outcomes
-4. Reporting Delay
-5. Location Analysis
-6. Data Quality
+Version 3 includes incident analytics, arrest analytics, and incident-to-arrest matching.
 
 Role in Pipeline:
 This app belongs to the presentation layer. It uses dashboard-ready data generated from
@@ -30,7 +30,13 @@ import plotly.express as px
 import streamlit as st
 
 
-DATA_PATH = Path("dashboard/powerbi/data/incident_detail.csv")
+DATA_DIR = Path("dashboard/powerbi/data")
+
+INCIDENT_DETAIL_PATH = DATA_DIR / "incident_detail.csv"
+ARREST_DETAIL_PATH = DATA_DIR / "arrest_detail.csv"
+INCIDENT_ARREST_MATCH_PATH = DATA_DIR / "incident_arrest_match.csv"
+CHARGE_CATEGORY_SUMMARY_PATH = DATA_DIR / "charge_category_summary.csv"
+DEMOGRAPHIC_SUMMARY_PATH = DATA_DIR / "demographic_summary.csv"
 
 
 st.set_page_config(
@@ -41,25 +47,61 @@ st.set_page_config(
 
 
 @st.cache_data
-def load_data():
-    """Load dashboard-ready incident detail data."""
-    if not DATA_PATH.exists():
-        st.error(f"Data file not found: {DATA_PATH}")
+def load_csv(path):
+    """Load a CSV file with a friendly error if the file does not exist."""
+    if not path.exists():
+        st.error(f"Data file not found: {path}")
         st.stop()
 
-    data = pd.read_csv(DATA_PATH)
+    return pd.read_csv(path)
 
-    data["occurred_datetime"] = pd.to_datetime(
-        data["occurred_datetime"],
+
+@st.cache_data
+def load_dashboard_data():
+    """Load all dashboard-ready datasets."""
+    incident_data = load_csv(INCIDENT_DETAIL_PATH)
+    arrest_data = load_csv(ARREST_DETAIL_PATH)
+    match_data = load_csv(INCIDENT_ARREST_MATCH_PATH)
+    charge_summary = load_csv(CHARGE_CATEGORY_SUMMARY_PATH)
+    demographic_summary = load_csv(DEMOGRAPHIC_SUMMARY_PATH)
+
+    incident_data["occurred_datetime"] = pd.to_datetime(
+        incident_data["occurred_datetime"],
         errors="coerce"
     )
 
-    data["reported_datetime"] = pd.to_datetime(
-        data["reported_datetime"],
+    incident_data["reported_datetime"] = pd.to_datetime(
+        incident_data["reported_datetime"],
         errors="coerce"
     )
 
-    return data
+    arrest_data["arrested_datetime"] = pd.to_datetime(
+        arrest_data["arrested_datetime"],
+        errors="coerce"
+    )
+
+    match_data["occurred_datetime"] = pd.to_datetime(
+        match_data["occurred_datetime"],
+        errors="coerce"
+    )
+
+    match_data["reported_datetime"] = pd.to_datetime(
+        match_data["reported_datetime"],
+        errors="coerce"
+    )
+
+    match_data["arrested_datetime"] = pd.to_datetime(
+        match_data["arrested_datetime"],
+        errors="coerce"
+    )
+
+    return {
+        "incident_data": incident_data,
+        "arrest_data": arrest_data,
+        "match_data": match_data,
+        "charge_summary": charge_summary,
+        "demographic_summary": demographic_summary
+    }
 
 
 def format_number(value):
@@ -87,9 +129,9 @@ def get_month_order(data):
     return month_order["occurred_month_name"].tolist()
 
 
-def apply_filters(data):
-    """Create sidebar filters and return filtered data."""
-    st.sidebar.header("Filters")
+def apply_incident_filters(data):
+    """Create sidebar filters for incident data and return filtered data."""
+    st.sidebar.header("Incident Filters")
 
     month_options = get_month_order(data)
     crime_group_options = sorted(data["crime_group"].dropna().unique().tolist())
@@ -138,6 +180,28 @@ def apply_filters(data):
     return filtered_data
 
 
+def filter_related_arrest_data(arrest_data, match_data, filtered_incident_data):
+    """Filter arrest and match datasets based on selected incident case numbers."""
+    selected_case_numbers = filtered_incident_data["case_number"].dropna().unique().tolist()
+
+    filtered_match_data = match_data[
+        match_data["case_number"].isin(selected_case_numbers)
+    ]
+
+    matched_arrest_ids = (
+        filtered_match_data["arrest_id"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    filtered_arrest_data = arrest_data[
+        arrest_data["arrest_id"].isin(matched_arrest_ids)
+    ]
+
+    return filtered_arrest_data, filtered_match_data
+
+
 def create_count_dataframe(data, group_column, count_column_name="incident_count"):
     """Create a grouped count dataframe."""
     return (
@@ -148,8 +212,8 @@ def create_count_dataframe(data, group_column, count_column_name="incident_count
     )
 
 
-def create_horizontal_bar_chart(data, group_column, title, max_categories=None):
-    """Create a horizontal bar chart for grouped incident counts."""
+def create_horizontal_bar_chart(data, group_column, title, max_categories=None, count_label="Incident Count"):
+    """Create a horizontal bar chart for grouped counts."""
     chart_data = create_count_dataframe(data, group_column)
 
     if max_categories is not None:
@@ -164,7 +228,7 @@ def create_horizontal_bar_chart(data, group_column, title, max_categories=None):
         orientation="h",
         title=title,
         labels={
-            "incident_count": "Incident Count",
+            "incident_count": count_label,
             group_column: ""
         }
     )
@@ -177,8 +241,8 @@ def create_horizontal_bar_chart(data, group_column, title, max_categories=None):
     return figure
 
 
-def create_vertical_bar_chart(data, group_column, title):
-    """Create a vertical bar chart for grouped incident counts."""
+def create_vertical_bar_chart(data, group_column, title, count_label="Incident Count"):
+    """Create a vertical bar chart for grouped counts."""
     chart_data = create_count_dataframe(data, group_column)
 
     figure = px.bar(
@@ -188,7 +252,7 @@ def create_vertical_bar_chart(data, group_column, title):
         title=title,
         labels={
             group_column: "",
-            "incident_count": "Incident Count"
+            "incident_count": count_label
         }
     )
 
@@ -218,6 +282,35 @@ def create_monthly_line_chart(data):
         labels={
             "occurred_month_name": "Month",
             "incident_count": "Incident Count"
+        }
+    )
+
+    figure.update_layout(
+        height=430,
+        margin=dict(l=10, r=10, t=55, b=10)
+    )
+
+    return figure
+
+
+def create_arrest_monthly_chart(arrest_data):
+    """Create a monthly arrest trend chart."""
+    chart_data = (
+        arrest_data.groupby(["arrested_month", "arrested_month_name"])
+        .size()
+        .reset_index(name="arrest_count")
+        .sort_values("arrested_month")
+    )
+
+    figure = px.line(
+        chart_data,
+        x="arrested_month_name",
+        y="arrest_count",
+        markers=True,
+        title="Arrests by Month",
+        labels={
+            "arrested_month_name": "Month",
+            "arrest_count": "Arrest Count"
         }
     )
 
@@ -769,45 +862,255 @@ def show_location_analysis(data):
     )
 
 
-def show_data_quality(data):
+def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_summary):
+    """Display the Arrest and Charge Analysis tab."""
+    st.subheader("Arrest & Charge Analysis")
+
+    total_arrests = len(arrest_data)
+    unique_arrest_cases = arrest_data["case_number"].nunique()
+    matched_incidents = int(match_data["has_matching_arrest"].sum())
+    total_incidents = len(match_data)
+
+    match_percentage = (
+        matched_incidents / total_incidents * 100
+        if total_incidents > 0
+        else 0
+    )
+
+    top_charge_category = (
+        charge_summary.sort_values("arrest_count", ascending=False).iloc[0]["charge_category"]
+        if not charge_summary.empty
+        else "N/A"
+    )
+
+    card_1, card_2, card_3, card_4 = st.columns(4)
+
+    card_1.metric("Total Arrest Records", format_number(total_arrests))
+    card_2.metric("Unique Arrest Case Numbers", format_number(unique_arrest_cases))
+    card_3.metric("Matched Incident Records", format_number(matched_incidents))
+    card_4.metric("Incident Match %", format_percentage(match_percentage))
+
+    card_5, card_6, card_7 = st.columns(3)
+
+    card_5.metric("Top Charge Category", top_charge_category)
+    card_6.metric("Charge Categories", format_number(charge_summary["charge_category"].nunique()))
+    card_7.metric("Demographic Groups", format_number(len(demographic_summary)))
+
+    st.caption(
+        "Arrest records are matched to incident records using UMPD case number. "
+        "Demographic summaries are descriptive only and should not be used for individual prediction or risk scoring."
+    )
+
+    st.divider()
+
+    left_column, right_column = st.columns(2)
+
+    with left_column:
+        st.plotly_chart(
+            create_arrest_monthly_chart(arrest_data),
+            use_container_width=True,
+            key="arrest_monthly_chart"
+        )
+
+    with right_column:
+        st.plotly_chart(
+            create_horizontal_bar_chart(
+                arrest_data,
+                "charge_category",
+                "Arrests by Charge Category",
+                count_label="Arrest Count"
+            ),
+            use_container_width=True,
+            key="arrest_charge_category_chart"
+        )
+
+    left_column, right_column = st.columns(2)
+
+    with left_column:
+        st.plotly_chart(
+            create_horizontal_bar_chart(
+                arrest_data,
+                "race",
+                "Arrests by Race",
+                count_label="Arrest Count"
+            ),
+            use_container_width=True,
+            key="arrest_race_chart"
+        )
+
+    with right_column:
+        st.plotly_chart(
+            create_horizontal_bar_chart(
+                arrest_data,
+                "sex",
+                "Arrests by Sex",
+                count_label="Arrest Count"
+            ),
+            use_container_width=True,
+            key="arrest_sex_chart"
+        )
+
+    left_column, right_column = st.columns(2)
+
+    with left_column:
+        match_summary = (
+            match_data.groupby("has_matching_arrest")
+            .size()
+            .reset_index(name="incident_count")
+        )
+
+        match_summary["match_status"] = match_summary["has_matching_arrest"].map(
+            {
+                0: "No Matching Arrest",
+                1: "Matching Arrest"
+            }
+        )
+
+        figure = px.bar(
+            match_summary,
+            x="match_status",
+            y="incident_count",
+            title="Incident-to-Arrest Match Summary",
+            labels={
+                "match_status": "",
+                "incident_count": "Incident Count"
+            }
+        )
+
+        figure.update_layout(
+            height=430,
+            margin=dict(l=10, r=10, t=55, b=10)
+        )
+
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            key="incident_arrest_match_chart"
+        )
+
+    with right_column:
+        matched_charge_data = (
+            match_data[match_data["has_matching_arrest"] == 1]
+            .groupby("charge_category")
+            .size()
+            .reset_index(name="matched_incident_count")
+            .sort_values("matched_incident_count", ascending=True)
+        )
+
+        figure = px.bar(
+            matched_charge_data,
+            x="matched_incident_count",
+            y="charge_category",
+            orientation="h",
+            title="Matched Incidents by Charge Category",
+            labels={
+                "matched_incident_count": "Matched Incident Count",
+                "charge_category": ""
+            }
+        )
+
+        figure.update_layout(
+            height=430,
+            margin=dict(l=10, r=10, t=55, b=10)
+        )
+
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            key="matched_incident_charge_category_chart"
+        )
+
+    with st.expander("View Sample Arrest Records"):
+        arrest_preview_columns = [
+            "arrest_id",
+            "arrest_number",
+            "case_number",
+            "arrested_datetime",
+            "charge_category",
+            "race",
+            "sex",
+            "age_group",
+            "arrested_charge"
+        ]
+
+        st.dataframe(
+            arrest_data[arrest_preview_columns].head(100),
+            use_container_width=True
+        )
+
+    with st.expander("View Matched Incident-Arrest Records"):
+        match_preview_columns = [
+            "incident_id",
+            "case_number",
+            "occurred_datetime",
+            "crime_group",
+            "disposition_group",
+            "arrest_id",
+            "arrest_number",
+            "arrested_datetime",
+            "charge_category",
+            "hours_from_incident_to_arrest"
+        ]
+
+        st.dataframe(
+            match_data[
+                match_data["has_matching_arrest"] == 1
+            ][match_preview_columns].head(100),
+            use_container_width=True
+        )
+
+
+def show_data_quality(incident_data, arrest_data):
     """Display the Data Quality tab."""
     st.subheader("Data Quality")
 
-    total_records = len(data)
-    valid_case_numbers = int(data["has_valid_case_number"].sum())
-    valid_occurred_dates = int(data["has_valid_occurred_datetime"].sum())
-    valid_reported_dates = int(data["has_valid_reported_datetime"].sum())
-    valid_reporting_delays = int(data["has_valid_reporting_delay"].sum())
+    total_incident_records = len(incident_data)
+    total_arrest_records = len(arrest_data)
 
-    card_1, card_2, card_3, card_4, card_5 = st.columns(5)
+    valid_incident_case_numbers = int(incident_data["has_valid_case_number"].sum())
+    valid_incident_dates = int(incident_data["has_valid_occurred_datetime"].sum())
+    valid_arrest_case_numbers = int(arrest_data["has_valid_case_number"].sum())
+    valid_arrest_dates = int(arrest_data["has_valid_arrested_datetime"].sum())
 
-    card_1.metric("Total Records", format_number(total_records))
-    card_2.metric("Valid Case Numbers", format_number(valid_case_numbers))
-    card_3.metric("Valid Occurred Dates", format_number(valid_occurred_dates))
-    card_4.metric("Valid Reported Dates", format_number(valid_reported_dates))
-    card_5.metric("Valid Reporting Delays", format_number(valid_reporting_delays))
+    card_1, card_2, card_3, card_4, card_5, card_6 = st.columns(6)
+
+    card_1.metric("Incident Records", format_number(total_incident_records))
+    card_2.metric("Arrest Records", format_number(total_arrest_records))
+    card_3.metric("Valid Incident Cases", format_number(valid_incident_case_numbers))
+    card_4.metric("Valid Incident Dates", format_number(valid_incident_dates))
+    card_5.metric("Valid Arrest Cases", format_number(valid_arrest_case_numbers))
+    card_6.metric("Valid Arrest Dates", format_number(valid_arrest_dates))
 
     st.divider()
 
     quality_data = pd.DataFrame(
         {
             "Quality Check": [
-                "Valid Case Number",
-                "Valid Occurred Datetime",
-                "Valid Reported Datetime",
-                "Valid Reporting Delay"
+                "Incident Valid Case Number",
+                "Incident Valid Occurred Datetime",
+                "Incident Valid Reported Datetime",
+                "Incident Valid Reporting Delay",
+                "Arrest Valid Case Number",
+                "Arrest Valid Arrested Datetime",
+                "Arrest Has Charge Text"
             ],
             "Valid Count": [
-                valid_case_numbers,
-                valid_occurred_dates,
-                valid_reported_dates,
-                valid_reporting_delays
+                valid_incident_case_numbers,
+                int(incident_data["has_valid_occurred_datetime"].sum()),
+                int(incident_data["has_valid_reported_datetime"].sum()),
+                int(incident_data["has_valid_reporting_delay"].sum()),
+                valid_arrest_case_numbers,
+                valid_arrest_dates,
+                int(arrest_data["has_charge_text"].sum())
             ],
             "Invalid Count": [
-                total_records - valid_case_numbers,
-                total_records - valid_occurred_dates,
-                total_records - valid_reported_dates,
-                total_records - valid_reporting_delays
+                total_incident_records - valid_incident_case_numbers,
+                total_incident_records - int(incident_data["has_valid_occurred_datetime"].sum()),
+                total_incident_records - int(incident_data["has_valid_reported_datetime"].sum()),
+                total_incident_records - int(incident_data["has_valid_reporting_delay"].sum()),
+                total_arrest_records - valid_arrest_case_numbers,
+                total_arrest_records - valid_arrest_dates,
+                total_arrest_records - int(arrest_data["has_charge_text"].sum())
             ]
         }
     )
@@ -825,7 +1128,7 @@ def show_data_quality(data):
     )
 
     figure.update_layout(
-        height=430,
+        height=500,
         margin=dict(l=10, r=10, t=55, b=10)
     )
 
@@ -835,8 +1138,8 @@ def show_data_quality(data):
         key="quality_summary_chart"
     )
 
-    with st.expander("Records Needing Review"):
-        review_columns = [
+    with st.expander("Incident Records Needing Review"):
+        incident_review_columns = [
             "incident_id",
             "case_number",
             "occurred_datetime",
@@ -850,15 +1153,43 @@ def show_data_quality(data):
             "has_valid_reporting_delay"
         ]
 
-        review_data = data[
-            (data["has_valid_case_number"] == 0)
-            | (data["has_valid_occurred_datetime"] == 0)
-            | (data["has_valid_reported_datetime"] == 0)
-            | (data["has_valid_reporting_delay"] == 0)
+        incident_review_data = incident_data[
+            (incident_data["has_valid_case_number"] == 0)
+            | (incident_data["has_valid_occurred_datetime"] == 0)
+            | (incident_data["has_valid_reported_datetime"] == 0)
+            | (incident_data["has_valid_reporting_delay"] == 0)
         ]
 
         st.dataframe(
-            review_data[review_columns],
+            incident_review_data[incident_review_columns],
+            use_container_width=True
+        )
+
+    with st.expander("Arrest Records Needing Review"):
+        arrest_review_columns = [
+            "arrest_id",
+            "arrest_number",
+            "case_number",
+            "arrested_datetime",
+            "charge_category",
+            "race",
+            "sex",
+            "age_group",
+            "has_valid_arrest_number",
+            "has_valid_case_number",
+            "has_valid_arrested_datetime",
+            "has_charge_text"
+        ]
+
+        arrest_review_data = arrest_data[
+            (arrest_data["has_valid_arrest_number"] == 0)
+            | (arrest_data["has_valid_case_number"] == 0)
+            | (arrest_data["has_valid_arrested_datetime"] == 0)
+            | (arrest_data["has_charge_text"] == 0)
+        ]
+
+        st.dataframe(
+            arrest_review_data[arrest_review_columns],
             use_container_width=True
         )
 
@@ -884,52 +1215,76 @@ def show_sample_records(data):
 
 def main():
     """Run the Streamlit dashboard."""
-    data = load_data()
+    dashboard_data = load_dashboard_data()
+
+    incident_data = dashboard_data["incident_data"]
+    arrest_data = dashboard_data["arrest_data"]
+    match_data = dashboard_data["match_data"]
+    charge_summary = dashboard_data["charge_summary"]
+    demographic_summary = dashboard_data["demographic_summary"]
 
     st.title("Terp Protect: Campus Safety Incident Analytics")
 
     st.caption(
-        "Interactive dashboard built from cleaned and modeled UMPD Daily Crime and Incident Log records."
+        "Interactive dashboard built from cleaned and modeled UMPD Daily Crime and Incident Log and Arrest Log records."
     )
 
-    filtered_data = apply_filters(data)
+    filtered_incident_data = apply_incident_filters(incident_data)
 
-    if filtered_data.empty:
-        st.warning("No records match the selected filters.")
+    if filtered_incident_data.empty:
+        st.warning("No incident records match the selected filters.")
         return
 
-    tab_1, tab_2, tab_3, tab_4, tab_5, tab_6 = st.tabs(
+    filtered_arrest_data, filtered_match_data = filter_related_arrest_data(
+        arrest_data,
+        match_data,
+        filtered_incident_data
+    )
+
+    tab_1, tab_2, tab_3, tab_4, tab_5, tab_6, tab_7 = st.tabs(
         [
             "Executive Overview",
             "Incident Trends",
             "Incident Outcomes",
             "Reporting Delay",
             "Location Analysis",
+            "Arrest & Charge Analysis",
             "Data Quality"
         ]
     )
 
     with tab_1:
-        show_executive_overview(filtered_data)
+        show_executive_overview(filtered_incident_data)
 
     with tab_2:
-        show_incident_trends(filtered_data)
+        show_incident_trends(filtered_incident_data)
 
     with tab_3:
-        show_incident_outcomes(filtered_data)
+        show_incident_outcomes(filtered_incident_data)
 
     with tab_4:
-        show_reporting_delay(filtered_data)
+        show_reporting_delay(filtered_incident_data)
 
     with tab_5:
-        show_location_analysis(filtered_data)
+        show_location_analysis(filtered_incident_data)
 
     with tab_6:
-        show_data_quality(filtered_data)
+        show_arrest_analysis(
+            filtered_arrest_data,
+            filtered_match_data,
+            charge_summary,
+            demographic_summary
+        )
+
+    with tab_7:
+        show_data_quality(
+            filtered_incident_data,
+            filtered_arrest_data
+        )
 
     st.divider()
 
-    show_sample_records(filtered_data)
+    show_sample_records(filtered_incident_data)
 
 
 if __name__ == "__main__":

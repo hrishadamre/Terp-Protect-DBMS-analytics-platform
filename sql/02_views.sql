@@ -1,17 +1,7 @@
-/*
-Terp Protect DBMS
-File: 02_views.sql
-Purpose:
-Create reusable SQL views for incident analytics, dashboarding, and business analysis.
-Current Scope:
-- UMPD Daily Crime and Incident Logs
-- Year: 2025
-Database:
-- data/database/terp_protect.db
-Notes:
-These views join the fact table with dimension tables so analysis can be done using readable business fields instead of only foreign key IDs.
-*/
-
+DROP VIEW IF EXISTS vw_incident_arrest_match;
+DROP VIEW IF EXISTS vw_arrest_detail;
+DROP VIEW IF EXISTS vw_charge_category_summary;
+DROP VIEW IF EXISTS vw_demographic_summary;
 DROP VIEW IF EXISTS vw_incident_detail;
 DROP VIEW IF EXISTS vw_monthly_incident_trends;
 DROP VIEW IF EXISTS vw_disposition_summary;
@@ -26,13 +16,17 @@ SELECT
     fi.occurred_datetime,
     fi.reported_datetime,
     od.full_date AS occurred_date,
-    rd.full_date AS reported_date,
     od.year AS occurred_year,
     od.month AS occurred_month,
     od.month_name AS occurred_month_name,
     od.weekday AS occurred_weekday,
     od.is_weekend AS occurred_is_weekend,
     od.semester_period AS occurred_semester_period,
+    rd.full_date AS reported_date,
+    rd.year AS reported_year,
+    rd.month AS reported_month,
+    rd.month_name AS reported_month_name,
+    rd.weekday AS reported_weekday,
     fi.hour AS occurred_hour,
     dct.crime_type,
     dct.crime_group,
@@ -43,8 +37,6 @@ SELECT
     dd.is_closed,
     dl.location_raw,
     dl.location_group,
-    dl.jurisdiction_group,
-    dl.is_on_campus,
     fi.report_delay_hours,
     fi.report_delay_days,
     fi.delay_bucket,
@@ -66,6 +58,82 @@ LEFT JOIN dim_disposition dd
     ON fi.disposition_id = dd.disposition_id
 LEFT JOIN dim_location dl
     ON fi.location_id = dl.location_id;
+
+CREATE VIEW vw_arrest_detail AS
+SELECT
+    fa.arrest_id,
+    fa.arrest_number,
+    fa.case_number,
+    fa.arrested_datetime,
+    ad.full_date AS arrested_date,
+    ad.year AS arrested_year,
+    ad.month AS arrested_month,
+    ad.month_name AS arrested_month_name,
+    ad.weekday AS arrested_weekday,
+    ad.is_weekend AS arrested_is_weekend,
+    ad.semester_period AS arrested_semester_period,
+    fa.arrested_hour,
+    ddem.race,
+    ddem.sex,
+    ddem.age_group,
+    dcc.charge_category,
+    dcc.is_alcohol_related,
+    dcc.is_drug_related,
+    dcc.is_theft_related,
+    fa.arrested_charge,
+    fa.source_year,
+    fa.source_url,
+    fa.scraped_at,
+    fa.has_valid_arrest_number,
+    fa.has_valid_case_number,
+    fa.has_valid_arrested_datetime,
+    fa.has_charge_text
+FROM fact_arrest fa
+LEFT JOIN dim_date ad
+    ON fa.arrest_date_id = ad.date_id
+LEFT JOIN dim_demographic ddem
+    ON fa.demographic_id = ddem.demographic_id
+LEFT JOIN dim_charge_category dcc
+    ON fa.charge_category_id = dcc.charge_category_id;
+
+CREATE VIEW vw_incident_arrest_match AS
+SELECT
+    vi.incident_id,
+    vi.case_number,
+    vi.occurred_datetime,
+    vi.reported_datetime,
+    vi.crime_type,
+    vi.crime_group,
+    vi.disposition,
+    vi.disposition_group,
+    vi.location_raw,
+    vi.location_group,
+    vi.report_delay_hours,
+    vi.delay_bucket,
+    va.arrest_id,
+    va.arrest_number,
+    va.arrested_datetime,
+    va.charge_category,
+    va.arrested_charge,
+    va.race,
+    va.sex,
+    va.age_group,
+    CASE
+        WHEN va.arrest_id IS NOT NULL THEN 1
+        ELSE 0
+    END AS has_matching_arrest,
+    CASE
+        WHEN va.arrested_datetime IS NOT NULL
+             AND vi.occurred_datetime IS NOT NULL
+        THEN ROUND(
+            (julianday(va.arrested_datetime) - julianday(vi.occurred_datetime)) * 24,
+            2
+        )
+        ELSE NULL
+    END AS hours_from_incident_to_arrest
+FROM vw_incident_detail vi
+LEFT JOIN vw_arrest_detail va
+    ON vi.case_number = va.case_number;
 
 CREATE VIEW vw_monthly_incident_trends AS
 SELECT
@@ -90,7 +158,7 @@ SELECT
     disposition_group,
     disposition,
     COUNT(*) AS incident_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS incident_percentage
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM vw_incident_detail), 2) AS incident_percentage
 FROM vw_incident_detail
 GROUP BY
     disposition_group,
@@ -102,7 +170,6 @@ CREATE VIEW vw_reporting_delay_summary AS
 SELECT
     delay_bucket,
     COUNT(*) AS incident_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS incident_percentage,
     ROUND(AVG(report_delay_hours), 2) AS avg_report_delay_hours,
     ROUND(AVG(report_delay_days), 2) AS avg_report_delay_days
 FROM vw_incident_detail
@@ -110,7 +177,7 @@ GROUP BY
     delay_bucket
 ORDER BY
     incident_count DESC;
-    
+
 CREATE VIEW vw_location_summary AS
 SELECT
     location_group,
@@ -124,18 +191,45 @@ GROUP BY
     location_raw
 ORDER BY
     incident_count DESC;
-    
+
 CREATE VIEW vw_crime_group_summary AS
 SELECT
     crime_group,
     COUNT(*) AS incident_count,
     SUM(is_arrest_related) AS arrest_related_count,
-    SUM(is_pending) AS pending_count,
-    SUM(is_closed) AS closed_count,
-    ROUND(100.0 * SUM(is_arrest_related) / COUNT(*), 2) AS arrest_related_rate,
+    ROUND(SUM(is_arrest_related) * 100.0 / COUNT(*), 2) AS arrest_related_percentage,
     ROUND(AVG(report_delay_hours), 2) AS avg_report_delay_hours
 FROM vw_incident_detail
 GROUP BY
     crime_group
 ORDER BY
     incident_count DESC;
+
+CREATE VIEW vw_charge_category_summary AS
+SELECT
+    charge_category,
+    COUNT(*) AS arrest_count,
+    SUM(is_alcohol_related) AS alcohol_related_count,
+    SUM(is_drug_related) AS drug_related_count,
+    SUM(is_theft_related) AS theft_related_count,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM vw_arrest_detail), 2) AS arrest_percentage
+FROM vw_arrest_detail
+GROUP BY
+    charge_category
+ORDER BY
+    arrest_count DESC;
+
+CREATE VIEW vw_demographic_summary AS
+SELECT
+    race,
+    sex,
+    age_group,
+    COUNT(*) AS arrest_count,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM vw_arrest_detail), 2) AS arrest_percentage
+FROM vw_arrest_detail
+GROUP BY
+    race,
+    sex,
+    age_group
+ORDER BY
+    arrest_count DESC;
