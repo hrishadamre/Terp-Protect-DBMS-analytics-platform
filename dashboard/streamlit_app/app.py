@@ -16,7 +16,8 @@ Input Files:
 - dashboard/powerbi/data/demographic_summary.csv
 
 Current App Version:
-Version 3 includes incident analytics, arrest analytics, and incident-to-arrest matching.
+Version 5 includes incident analytics, arrest analytics, incident-to-arrest matching,
+data quality checks, improved dashboard styling, and dynamic insight captions.
 
 Role in Pipeline:
 This app belongs to the presentation layer. It uses dashboard-ready data generated from
@@ -44,6 +45,138 @@ st.set_page_config(
     page_icon="🐢",
     layout="wide"
 )
+
+
+def apply_custom_styles():
+    """Apply custom dashboard styling."""
+    st.markdown(
+        """
+        <style>
+        .main {
+            background-color: #fafafa;
+        }
+
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+
+        .dashboard-header {
+            background: linear-gradient(90deg, #111111 0%, #b00020 100%);
+            padding: 1.4rem 1.6rem;
+            border-radius: 14px;
+            margin-bottom: 1.4rem;
+        }
+
+        .dashboard-header h1 {
+            color: white;
+            font-size: 2rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .dashboard-header p {
+            color: #f2f2f2;
+            font-size: 1rem;
+            margin-bottom: 0;
+        }
+
+        .section-note {
+            background-color: #ffffff;
+            border-left: 5px solid #b00020;
+            padding: 0.9rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            color: #333333;
+        }
+
+        .insight-box {
+            background-color: #fff8e6;
+            border-left: 5px solid #f4c430;
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            margin-top: 0.4rem;
+            margin-bottom: 1rem;
+            color: #333333;
+            font-size: 0.95rem;
+        }
+
+        div[data-testid="stMetric"] {
+            background-color: #ffffff;
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px solid #e6e6e6;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+        }
+
+        div[data-testid="stMetricLabel"] {
+            font-size: 0.9rem;
+            color: #444444;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 1.4rem;
+            color: #111111;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.4rem;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            background-color: #ffffff;
+            border-radius: 10px 10px 0 0;
+            padding: 0.6rem 1rem;
+            border: 1px solid #e6e6e6;
+        }
+
+        .stTabs [aria-selected="true"] {
+            background-color: #b00020;
+            color: white;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def show_dashboard_header():
+    """Display the main dashboard header."""
+    st.markdown(
+        """
+        <div class="dashboard-header">
+            <h1>Terp Protect: Campus Safety Analytics</h1>
+            <p>
+                Interactive DBMS-powered dashboard for exploring UMPD incident records,
+                arrest records, reporting delays, case outcomes, and charge patterns.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def show_section_note(text):
+    """Display a short styled note under a section heading."""
+    st.markdown(
+        f"""
+        <div class="section-note">
+            {text}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def show_insight(text):
+    """Display a short analytical insight below a chart or section."""
+    st.markdown(
+        f"""
+        <div class="insight-box">
+            <strong>Insight:</strong> {text}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 @st.cache_data
@@ -115,6 +248,19 @@ def format_percentage(value):
         return "0.0%"
 
     return f"{value:.1f}%"
+
+
+def get_top_value(data, column):
+    """Return the most frequent value and its count for a column."""
+    if data.empty or column not in data.columns:
+        return "N/A", 0
+
+    counts = data[column].dropna().value_counts()
+
+    if counts.empty:
+        return "N/A", 0
+
+    return counts.index[0], int(counts.iloc[0])
 
 
 def get_month_order(data):
@@ -504,6 +650,10 @@ def show_executive_overview(data):
     """Display the Executive Overview tab."""
     st.subheader("Executive Overview")
 
+    show_section_note(
+        "This page summarizes overall incident volume, arrest-related outcomes, reporting delay, and the most common incident categories."
+    )
+
     total_incidents = len(data)
     arrest_related_incidents = int(data["is_arrest_related"].sum())
 
@@ -515,23 +665,9 @@ def show_executive_overview(data):
 
     average_reporting_delay = data["report_delay_hours"].mean()
 
-    most_common_crime_group = (
-        data["crime_group"].mode().iloc[0]
-        if not data.empty
-        else "N/A"
-    )
-
-    most_common_disposition = (
-        data["disposition_group"].mode().iloc[0]
-        if not data.empty
-        else "N/A"
-    )
-
-    top_location_group = (
-        data["location_group"].mode().iloc[0]
-        if not data.empty
-        else "N/A"
-    )
+    most_common_crime_group, crime_count = get_top_value(data, "crime_group")
+    most_common_disposition, disposition_count = get_top_value(data, "disposition_group")
+    top_location_group, location_count = get_top_value(data, "location_group")
 
     card_1, card_2, card_3, card_4 = st.columns(4)
 
@@ -550,6 +686,12 @@ def show_executive_overview(data):
     card_6.metric("Most Common Disposition", most_common_disposition)
     card_7.metric("Top Location Group", top_location_group)
 
+    show_insight(
+        f"In the selected records, {most_common_crime_group} is the most common crime group "
+        f"with {format_number(crime_count)} incidents. The most common disposition group is "
+        f"{most_common_disposition}."
+    )
+
     st.divider()
 
     left_column, right_column = st.columns(2)
@@ -561,11 +703,22 @@ def show_executive_overview(data):
             key="executive_monthly_line_chart"
         )
 
+        peak_month, peak_month_count = get_top_value(data, "occurred_month_name")
+        show_insight(
+            f"{peak_month} has the highest incident count in the selected filter range "
+            f"with {format_number(peak_month_count)} incidents."
+        )
+
     with right_column:
         st.plotly_chart(
             create_horizontal_bar_chart(data, "crime_group", "Incidents by Crime Group"),
             use_container_width=True,
             key="executive_crime_group_chart"
+        )
+
+        show_insight(
+            f"{most_common_crime_group} appears most frequently, making it the strongest driver "
+            f"of total incident volume in the current selection."
         )
 
     left_column, right_column = st.columns(2)
@@ -577,11 +730,20 @@ def show_executive_overview(data):
             key="executive_disposition_group_chart"
         )
 
+        show_insight(
+            f"{most_common_disposition} is the leading outcome category, appearing in "
+            f"{format_number(disposition_count)} incident records."
+        )
+
     with right_column:
         st.plotly_chart(
             create_horizontal_bar_chart(data, "location_group", "Incidents by Location Group"),
             use_container_width=True,
             key="executive_location_group_chart"
+        )
+
+        show_insight(
+            f"{top_location_group} is the highest-volume location group in the selected data."
         )
 
     st.plotly_chart(
@@ -590,28 +752,24 @@ def show_executive_overview(data):
         key="executive_delay_bucket_chart"
     )
 
+    top_delay_bucket, delay_bucket_count = get_top_value(data, "delay_bucket")
+    show_insight(
+        f"The most common reporting delay bucket is {top_delay_bucket}, with "
+        f"{format_number(delay_bucket_count)} records."
+    )
+
 
 def show_incident_trends(data):
     """Display the Incident Trends tab."""
     st.subheader("Incident Trends")
 
-    peak_month = (
-        create_count_dataframe(data, "occurred_month_name").iloc[0]["occurred_month_name"]
-        if not data.empty
-        else "N/A"
+    show_section_note(
+        "This page highlights when incidents occur by month, weekday, hour of day, and academic period."
     )
 
-    peak_weekday = (
-        create_count_dataframe(data, "occurred_weekday").iloc[0]["occurred_weekday"]
-        if not data.empty
-        else "N/A"
-    )
-
-    peak_hour = (
-        create_count_dataframe(data, "occurred_hour").iloc[0]["occurred_hour"]
-        if not data.empty
-        else "N/A"
-    )
+    peak_month, peak_month_count = get_top_value(data, "occurred_month_name")
+    peak_weekday, peak_weekday_count = get_top_value(data, "occurred_weekday")
+    peak_hour, peak_hour_count = get_top_value(data, "occurred_hour")
 
     weekend_percentage = (
         data["occurred_is_weekend"].sum() / len(data) * 100
@@ -626,6 +784,11 @@ def show_incident_trends(data):
     card_3.metric("Peak Hour", peak_hour)
     card_4.metric("Weekend Incident %", format_percentage(weekend_percentage))
 
+    show_insight(
+        f"Incident activity is highest in {peak_month}, on {peak_weekday}s, "
+        f"and around hour {peak_hour} in the selected filter range."
+    )
+
     st.divider()
 
     left_column, right_column = st.columns(2)
@@ -637,11 +800,20 @@ def show_incident_trends(data):
             key="trends_monthly_line_chart"
         )
 
+        show_insight(
+            f"{peak_month} is the peak month with {format_number(peak_month_count)} incidents."
+        )
+
     with right_column:
         st.plotly_chart(
             create_weekday_chart(data),
             use_container_width=True,
             key="trends_weekday_chart"
+        )
+
+        show_insight(
+            f"{peak_weekday} has the highest incident count with "
+            f"{format_number(peak_weekday_count)} incidents."
         )
 
     left_column, right_column = st.columns(2)
@@ -653,6 +825,11 @@ def show_incident_trends(data):
             key="trends_hourly_chart"
         )
 
+        show_insight(
+            f"Hour {peak_hour} has the highest incident count with "
+            f"{format_number(peak_hour_count)} incidents."
+        )
+
     with right_column:
         st.plotly_chart(
             create_vertical_bar_chart(data, "occurred_semester_period", "Incidents by Academic Period"),
@@ -660,15 +837,31 @@ def show_incident_trends(data):
             key="trends_academic_period_chart"
         )
 
+        top_period, period_count = get_top_value(data, "occurred_semester_period")
+        show_insight(
+            f"{top_period} has the highest incident volume among academic periods, "
+            f"with {format_number(period_count)} incidents."
+        )
+
 
 def show_incident_outcomes(data):
     """Display the Incident Outcomes tab."""
     st.subheader("Incident Outcomes")
 
+    show_section_note(
+        "This page compares case dispositions and shows how incident categories relate to outcome groups."
+    )
+
     total_incidents = len(data)
     arrest_count = int(data["is_arrest_related"].sum())
     pending_count = int(data["is_pending"].sum())
     closed_count = int(data["is_closed"].sum())
+
+    arrest_percentage = (
+        arrest_count / total_incidents * 100
+        if total_incidents > 0
+        else 0
+    )
 
     card_1, card_2, card_3, card_4 = st.columns(4)
 
@@ -676,6 +869,11 @@ def show_incident_outcomes(data):
     card_2.metric("Arrest-Related", format_number(arrest_count))
     card_3.metric("Pending / Active", format_number(pending_count))
     card_4.metric("Closed / Cleared", format_number(closed_count))
+
+    show_insight(
+        f"{format_percentage(arrest_percentage)} of selected incident records are marked as arrest-related "
+        f"based on their disposition category."
+    )
 
     st.divider()
 
@@ -688,11 +886,23 @@ def show_incident_outcomes(data):
             key="outcomes_disposition_group_chart"
         )
 
+        top_disposition, disposition_count = get_top_value(data, "disposition_group")
+        show_insight(
+            f"{top_disposition} is the most common disposition group, appearing in "
+            f"{format_number(disposition_count)} records."
+        )
+
     with right_column:
         st.plotly_chart(
             create_horizontal_bar_chart(data, "disposition", "Incidents by Detailed Disposition", max_categories=15),
             use_container_width=True,
             key="outcomes_detailed_disposition_chart"
+        )
+
+        top_detailed_disposition, detailed_count = get_top_value(data, "disposition")
+        show_insight(
+            f"The most common detailed disposition is {top_detailed_disposition}, "
+            f"with {format_number(detailed_count)} records."
         )
 
     st.plotly_chart(
@@ -701,10 +911,18 @@ def show_incident_outcomes(data):
         key="outcomes_crime_disposition_heatmap"
     )
 
+    show_insight(
+        "The heatmap helps identify which crime groups are most often associated with each disposition outcome."
+    )
+
 
 def show_reporting_delay(data):
     """Display the Reporting Delay tab."""
     st.subheader("Reporting Delay Analysis")
+
+    show_section_note(
+        "This page measures the time between when an incident occurred and when it was reported."
+    )
 
     valid_delay_data = data[data["has_valid_reporting_delay"] == 1]
 
@@ -736,6 +954,13 @@ def show_reporting_delay(data):
     card_3.metric("Same-Day Reporting %", format_percentage(same_day_percentage))
     card_4.metric("Over 7 Days Count", format_number(over_7_days_count))
 
+    show_insight(
+        f"The average reporting delay is {avg_delay_hours:.1f} hours. "
+        f"{format_percentage(same_day_percentage)} of valid records were reported within the same day."
+        if not pd.isna(avg_delay_hours)
+        else "Reporting delay could not be calculated for the selected data."
+    )
+
     st.divider()
 
     left_column, right_column = st.columns(2)
@@ -745,6 +970,12 @@ def show_reporting_delay(data):
             create_delay_bucket_chart(data),
             use_container_width=True,
             key="delay_delay_bucket_chart"
+        )
+
+        top_delay_bucket, delay_bucket_count = get_top_value(data, "delay_bucket")
+        show_insight(
+            f"{top_delay_bucket} is the most common reporting delay bucket, with "
+            f"{format_number(delay_bucket_count)} records."
         )
 
     with right_column:
@@ -758,6 +989,18 @@ def show_reporting_delay(data):
             key="delay_by_crime_group_chart"
         )
 
+        if not valid_delay_data.empty:
+            delay_by_crime = (
+                valid_delay_data
+                .groupby("crime_group")["report_delay_hours"]
+                .mean()
+                .sort_values(ascending=False)
+            )
+
+            show_insight(
+                f"{delay_by_crime.index[0]} has the highest average reporting delay among crime groups."
+            )
+
     st.plotly_chart(
         create_reporting_delay_by_group_chart(
             data,
@@ -767,6 +1010,18 @@ def show_reporting_delay(data):
         use_container_width=True,
         key="delay_by_location_group_chart"
     )
+
+    if not valid_delay_data.empty:
+        delay_by_location = (
+            valid_delay_data
+            .groupby("location_group")["report_delay_hours"]
+            .mean()
+            .sort_values(ascending=False)
+        )
+
+        show_insight(
+            f"{delay_by_location.index[0]} has the highest average reporting delay among location groups."
+        )
 
     with st.expander("Highest Reporting Delay Records"):
         delay_columns = [
@@ -793,25 +1048,25 @@ def show_location_analysis(data):
     """Display the Location Analysis tab."""
     st.subheader("Location Analysis")
 
+    show_section_note(
+        "This page identifies high-activity locations and shows how incident categories vary across location groups."
+    )
+
     unique_locations = data["location_raw"].nunique()
 
-    top_location = (
-        create_count_dataframe(data, "location_raw").iloc[0]["location_raw"]
-        if not data.empty
-        else "N/A"
-    )
-
-    top_location_group = (
-        create_count_dataframe(data, "location_group").iloc[0]["location_group"]
-        if not data.empty
-        else "N/A"
-    )
+    top_location, top_location_count = get_top_value(data, "location_raw")
+    top_location_group, top_location_group_count = get_top_value(data, "location_group")
 
     card_1, card_2, card_3 = st.columns(3)
 
     card_1.metric("Unique Locations", format_number(unique_locations))
     card_2.metric("Top Location", top_location)
     card_3.metric("Top Location Group", top_location_group)
+
+    show_insight(
+        f"The selected data includes {format_number(unique_locations)} unique locations. "
+        f"The highest-volume specific location is {top_location}."
+    )
 
     st.divider()
 
@@ -824,11 +1079,20 @@ def show_location_analysis(data):
             key="location_top_locations_chart"
         )
 
+        show_insight(
+            f"{top_location} appears most frequently with {format_number(top_location_count)} incidents."
+        )
+
     with right_column:
         st.plotly_chart(
             create_horizontal_bar_chart(data, "location_group", "Incidents by Location Group"),
             use_container_width=True,
             key="location_group_chart"
+        )
+
+        show_insight(
+            f"{top_location_group} is the leading location group with "
+            f"{format_number(top_location_group_count)} incidents."
         )
 
     matrix_data = (
@@ -861,10 +1125,18 @@ def show_location_analysis(data):
         key="location_crime_group_heatmap"
     )
 
+    show_insight(
+        "The location-crime heatmap helps identify which incident categories are concentrated in specific location groups."
+    )
+
 
 def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_summary):
     """Display the Arrest and Charge Analysis tab."""
     st.subheader("Arrest & Charge Analysis")
+
+    show_section_note(
+        "This page analyzes arrest records, charge categories, and incident-to-arrest matching using UMPD case numbers."
+    )
 
     total_arrests = len(arrest_data)
     unique_arrest_cases = arrest_data["case_number"].nunique()
@@ -896,6 +1168,11 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
     card_6.metric("Charge Categories", format_number(charge_summary["charge_category"].nunique()))
     card_7.metric("Demographic Groups", format_number(len(demographic_summary)))
 
+    show_insight(
+        f"{format_percentage(match_percentage)} of selected incident records have a matching arrest record. "
+        f"The leading charge category is {top_charge_category}."
+    )
+
     st.caption(
         "Arrest records are matched to incident records using UMPD case number. "
         "Demographic summaries are descriptive only and should not be used for individual prediction or risk scoring."
@@ -906,49 +1183,84 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
     left_column, right_column = st.columns(2)
 
     with left_column:
-        st.plotly_chart(
-            create_arrest_monthly_chart(arrest_data),
-            use_container_width=True,
-            key="arrest_monthly_chart"
-        )
+        if arrest_data.empty:
+            st.info("No matching arrest records are available for the selected filters.")
+        else:
+            st.plotly_chart(
+                create_arrest_monthly_chart(arrest_data),
+                use_container_width=True,
+                key="arrest_monthly_chart"
+            )
+
+            top_arrest_month, arrest_month_count = get_top_value(arrest_data, "arrested_month_name")
+            show_insight(
+                f"{top_arrest_month} has the highest arrest count in the selected data, "
+                f"with {format_number(arrest_month_count)} arrests."
+            )
 
     with right_column:
-        st.plotly_chart(
-            create_horizontal_bar_chart(
-                arrest_data,
-                "charge_category",
-                "Arrests by Charge Category",
-                count_label="Arrest Count"
-            ),
-            use_container_width=True,
-            key="arrest_charge_category_chart"
-        )
+        if arrest_data.empty:
+            st.info("No charge category chart available for the selected filters.")
+        else:
+            st.plotly_chart(
+                create_horizontal_bar_chart(
+                    arrest_data,
+                    "charge_category",
+                    "Arrests by Charge Category",
+                    count_label="Arrest Count"
+                ),
+                use_container_width=True,
+                key="arrest_charge_category_chart"
+            )
+
+            top_charge, charge_count = get_top_value(arrest_data, "charge_category")
+            show_insight(
+                f"{top_charge} is the most common charge category among matching arrest records."
+            )
 
     left_column, right_column = st.columns(2)
 
     with left_column:
-        st.plotly_chart(
-            create_horizontal_bar_chart(
-                arrest_data,
-                "race",
-                "Arrests by Race",
-                count_label="Arrest Count"
-            ),
-            use_container_width=True,
-            key="arrest_race_chart"
-        )
+        if not arrest_data.empty:
+            st.plotly_chart(
+                create_horizontal_bar_chart(
+                    arrest_data,
+                    "race",
+                    "Arrests by Race",
+                    count_label="Arrest Count"
+                ),
+                use_container_width=True,
+                key="arrest_race_chart"
+            )
+
+            top_race, race_count = get_top_value(arrest_data, "race")
+            show_insight(
+                f"{top_race} is the most frequent race value in the selected arrest records. "
+                "This is descriptive only and should be interpreted carefully."
+            )
+        else:
+            st.info("No race summary available for the selected filters.")
 
     with right_column:
-        st.plotly_chart(
-            create_horizontal_bar_chart(
-                arrest_data,
-                "sex",
-                "Arrests by Sex",
-                count_label="Arrest Count"
-            ),
-            use_container_width=True,
-            key="arrest_sex_chart"
-        )
+        if not arrest_data.empty:
+            st.plotly_chart(
+                create_horizontal_bar_chart(
+                    arrest_data,
+                    "sex",
+                    "Arrests by Sex",
+                    count_label="Arrest Count"
+                ),
+                use_container_width=True,
+                key="arrest_sex_chart"
+            )
+
+            top_sex, sex_count = get_top_value(arrest_data, "sex")
+            show_insight(
+                f"{top_sex} is the most frequent sex value in the selected arrest records. "
+                "This is descriptive only and should not be used for prediction."
+            )
+        else:
+            st.info("No sex summary available for the selected filters.")
 
     left_column, right_column = st.columns(2)
 
@@ -988,6 +1300,11 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
             key="incident_arrest_match_chart"
         )
 
+        show_insight(
+            f"{format_number(matched_incidents)} out of {format_number(total_incidents)} selected incident records "
+            f"have a matching arrest record."
+        )
+
     with right_column:
         matched_charge_data = (
             match_data[match_data["has_matching_arrest"] == 1]
@@ -997,28 +1314,40 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
             .sort_values("matched_incident_count", ascending=True)
         )
 
-        figure = px.bar(
-            matched_charge_data,
-            x="matched_incident_count",
-            y="charge_category",
-            orientation="h",
-            title="Matched Incidents by Charge Category",
-            labels={
-                "matched_incident_count": "Matched Incident Count",
-                "charge_category": ""
-            }
-        )
+        if matched_charge_data.empty:
+            st.info("No matched incident-charge records are available for the selected filters.")
+        else:
+            figure = px.bar(
+                matched_charge_data,
+                x="matched_incident_count",
+                y="charge_category",
+                orientation="h",
+                title="Matched Incidents by Charge Category",
+                labels={
+                    "matched_incident_count": "Matched Incident Count",
+                    "charge_category": ""
+                }
+            )
 
-        figure.update_layout(
-            height=430,
-            margin=dict(l=10, r=10, t=55, b=10)
-        )
+            figure.update_layout(
+                height=430,
+                margin=dict(l=10, r=10, t=55, b=10)
+            )
 
-        st.plotly_chart(
-            figure,
-            use_container_width=True,
-            key="matched_incident_charge_category_chart"
-        )
+            st.plotly_chart(
+                figure,
+                use_container_width=True,
+                key="matched_incident_charge_category_chart"
+            )
+
+            top_matched_charge = matched_charge_data.sort_values(
+                "matched_incident_count",
+                ascending=False
+            ).iloc[0]
+
+            show_insight(
+                f"{top_matched_charge['charge_category']} is the leading charge category among matched incident records."
+            )
 
     with st.expander("View Sample Arrest Records"):
         arrest_preview_columns = [
@@ -1064,13 +1393,29 @@ def show_data_quality(incident_data, arrest_data):
     """Display the Data Quality tab."""
     st.subheader("Data Quality")
 
+    show_section_note(
+        "This page checks whether key incident and arrest fields are valid, complete, and ready for analysis."
+    )
+
     total_incident_records = len(incident_data)
     total_arrest_records = len(arrest_data)
 
     valid_incident_case_numbers = int(incident_data["has_valid_case_number"].sum())
     valid_incident_dates = int(incident_data["has_valid_occurred_datetime"].sum())
-    valid_arrest_case_numbers = int(arrest_data["has_valid_case_number"].sum())
-    valid_arrest_dates = int(arrest_data["has_valid_arrested_datetime"].sum())
+    valid_arrest_case_numbers = int(arrest_data["has_valid_case_number"].sum()) if not arrest_data.empty else 0
+    valid_arrest_dates = int(arrest_data["has_valid_arrested_datetime"].sum()) if not arrest_data.empty else 0
+
+    incident_case_validity = (
+        valid_incident_case_numbers / total_incident_records * 100
+        if total_incident_records > 0
+        else 0
+    )
+
+    arrest_case_validity = (
+        valid_arrest_case_numbers / total_arrest_records * 100
+        if total_arrest_records > 0
+        else 0
+    )
 
     card_1, card_2, card_3, card_4, card_5, card_6 = st.columns(6)
 
@@ -1080,6 +1425,11 @@ def show_data_quality(incident_data, arrest_data):
     card_4.metric("Valid Incident Dates", format_number(valid_incident_dates))
     card_5.metric("Valid Arrest Cases", format_number(valid_arrest_case_numbers))
     card_6.metric("Valid Arrest Dates", format_number(valid_arrest_dates))
+
+    show_insight(
+        f"{format_percentage(incident_case_validity)} of selected incident records have valid case numbers. "
+        f"{format_percentage(arrest_case_validity)} of selected arrest records have valid case numbers."
+    )
 
     st.divider()
 
@@ -1101,7 +1451,7 @@ def show_data_quality(incident_data, arrest_data):
                 int(incident_data["has_valid_reporting_delay"].sum()),
                 valid_arrest_case_numbers,
                 valid_arrest_dates,
-                int(arrest_data["has_charge_text"].sum())
+                int(arrest_data["has_charge_text"].sum()) if not arrest_data.empty else 0
             ],
             "Invalid Count": [
                 total_incident_records - valid_incident_case_numbers,
@@ -1110,7 +1460,7 @@ def show_data_quality(incident_data, arrest_data):
                 total_incident_records - int(incident_data["has_valid_reporting_delay"].sum()),
                 total_arrest_records - valid_arrest_case_numbers,
                 total_arrest_records - valid_arrest_dates,
-                total_arrest_records - int(arrest_data["has_charge_text"].sum())
+                total_arrest_records - int(arrest_data["has_charge_text"].sum()) if not arrest_data.empty else 0
             ]
         }
     )
@@ -1136,6 +1486,10 @@ def show_data_quality(incident_data, arrest_data):
         figure,
         use_container_width=True,
         key="quality_summary_chart"
+    )
+
+    show_insight(
+        "Data quality checks confirm whether key identifiers, dates, reporting delays, and charge text are usable for analysis."
     )
 
     with st.expander("Incident Records Needing Review"):
@@ -1181,17 +1535,20 @@ def show_data_quality(incident_data, arrest_data):
             "has_charge_text"
         ]
 
-        arrest_review_data = arrest_data[
-            (arrest_data["has_valid_arrest_number"] == 0)
-            | (arrest_data["has_valid_case_number"] == 0)
-            | (arrest_data["has_valid_arrested_datetime"] == 0)
-            | (arrest_data["has_charge_text"] == 0)
-        ]
+        if arrest_data.empty:
+            st.info("No arrest records are available for the selected filters.")
+        else:
+            arrest_review_data = arrest_data[
+                (arrest_data["has_valid_arrest_number"] == 0)
+                | (arrest_data["has_valid_case_number"] == 0)
+                | (arrest_data["has_valid_arrested_datetime"] == 0)
+                | (arrest_data["has_charge_text"] == 0)
+            ]
 
-        st.dataframe(
-            arrest_review_data[arrest_review_columns],
-            use_container_width=True
-        )
+            st.dataframe(
+                arrest_review_data[arrest_review_columns],
+                use_container_width=True
+            )
 
 
 def show_sample_records(data):
@@ -1215,6 +1572,8 @@ def show_sample_records(data):
 
 def main():
     """Run the Streamlit dashboard."""
+    apply_custom_styles()
+
     dashboard_data = load_dashboard_data()
 
     incident_data = dashboard_data["incident_data"]
@@ -1223,11 +1582,7 @@ def main():
     charge_summary = dashboard_data["charge_summary"]
     demographic_summary = dashboard_data["demographic_summary"]
 
-    st.title("Terp Protect: Campus Safety Incident Analytics")
-
-    st.caption(
-        "Interactive dashboard built from cleaned and modeled UMPD Daily Crime and Incident Log and Arrest Log records."
-    )
+    show_dashboard_header()
 
     filtered_incident_data = apply_incident_filters(incident_data)
 
@@ -1289,3 +1644,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
