@@ -2,10 +2,10 @@
 incident_outcomes.py
 
 Purpose:
-Display the Incident Outcomes tab for the Terp Protect Streamlit dashboard.
+Display the Incident Outcomes section for the Terp Protect Streamlit dashboard.
 
-This page compares case dispositions, arrest-related outcomes, pending/active
-cases, closed/cleared cases, and crime group to disposition relationships.
+This section compares case dispositions, arrest-related outcomes, pending/active
+cases, closed/cleared cases, and crime group to outcome relationships.
 """
 
 import streamlit as st
@@ -28,11 +28,11 @@ from components.metrics import (
 
 
 def show_incident_outcomes(data):
-    """Display the Incident Outcomes tab."""
+    """Display the Incident Outcomes section."""
     st.subheader("Incident Outcomes")
 
     show_section_note(
-        "This page compares case dispositions and shows how incident categories relate to outcome groups."
+        "Review how reported incidents are resolved, categorized, or left pending based on disposition records."
     )
 
     total_incidents = len(data)
@@ -67,7 +67,7 @@ def show_incident_outcomes(data):
             create_horizontal_bar_chart(
                 data,
                 "disposition_group",
-                "Incidents by Disposition Group"
+                "Incidents by Outcome Group"
             ),
             use_container_width=True,
             key="outcomes_disposition_group_chart"
@@ -79,7 +79,7 @@ def show_incident_outcomes(data):
         )
 
         show_insight(
-            f"{top_disposition} is the most common disposition group, appearing in "
+            f"{top_disposition} is the most common outcome group, appearing in "
             f"{format_number(disposition_count)} records."
         )
 
@@ -112,5 +112,5 @@ def show_incident_outcomes(data):
     )
 
     show_insight(
-        "The heatmap helps identify which crime groups are most often associated with each disposition outcome."
+        "The heatmap helps identify which crime groups are most often associated with each outcome type."
     )

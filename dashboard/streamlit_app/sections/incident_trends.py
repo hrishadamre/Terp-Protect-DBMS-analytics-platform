@@ -2,16 +2,15 @@
 incident_trends.py
 
 Purpose:
-Display the Incident Trends tab for the Terp Protect Streamlit dashboard.
+Display the Incident Trends section for the Terp Protect Streamlit dashboard.
 
-This page analyzes when incidents occur by month, weekday, hour of day,
+This section analyzes when incidents occur by month, weekday, hour of day,
 and academic period.
 """
 
 import streamlit as st
 
 from components.charts import (
-    create_count_dataframe,
     create_hourly_chart,
     create_monthly_line_chart,
     create_vertical_bar_chart,
@@ -31,11 +30,11 @@ from components.metrics import (
 
 
 def show_incident_trends(data):
-    """Display the Incident Trends tab."""
+    """Display the Incident Trends section."""
     st.subheader("Incident Trends")
 
     show_section_note(
-        "This page highlights when incidents occur by month, weekday, hour of day, and academic period."
+        "Explore when incidents occur across months, weekdays, hours, and academic periods."
     )
 
     peak_month, peak_month_count = get_top_value(data, "occurred_month_name")
@@ -56,7 +55,7 @@ def show_incident_trends(data):
     card_4.metric("Weekend Incident %", format_percentage(weekend_percentage))
 
     show_insight(
-        f"Incident activity is highest in {peak_month}, on {peak_weekday}s, "
+        f"Incident activity peaks in {peak_month}, on {peak_weekday}s, "
         f"and around hour {peak_hour} in the selected filter range."
     )
 

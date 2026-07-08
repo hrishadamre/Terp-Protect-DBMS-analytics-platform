@@ -2,9 +2,9 @@
 location_analysis.py
 
 Purpose:
-Display the Location Analysis tab for the Terp Protect Streamlit dashboard.
+Display the Location Analysis section for the Terp Protect Streamlit dashboard.
 
-This page identifies high-activity locations, summarizes location groups,
+This section identifies high-activity locations, summarizes location groups,
 and shows how incident categories vary across location groups.
 """
 
@@ -12,6 +12,7 @@ import plotly.express as px
 import streamlit as st
 
 from components.charts import (
+    apply_chart_theme,
     create_horizontal_bar_chart
 )
 
@@ -27,11 +28,11 @@ from components.metrics import (
 
 
 def show_location_analysis(data):
-    """Display the Location Analysis tab."""
+    """Display the Location Analysis section."""
     st.subheader("Location Analysis")
 
     show_section_note(
-        "This page identifies high-activity locations and shows how incident categories vary across location groups."
+        "Identify high-activity locations and compare incident patterns across campus location groups."
     )
 
     unique_locations = data["location_raw"].nunique()
@@ -121,12 +122,20 @@ def show_location_analysis(data):
             "crime_group": "Crime Group",
             "location_group": "Location Group",
             "incident_count": "Incident Count"
-        }
+        },
+        color_continuous_scale="Blues"
     )
 
+    figure.update_traces(
+        hovertemplate="<b>%{y}</b><br>Crime Group: %{x}<br>Incidents: %{z}<extra></extra>"
+    )
+
+    figure = apply_chart_theme(figure, height=520)
+
     figure.update_layout(
-        height=520,
-        margin=dict(l=10, r=10, t=55, b=10)
+        coloraxis_colorbar={
+            "title": "Incidents"
+        }
     )
 
     st.plotly_chart(
@@ -136,5 +145,5 @@ def show_location_analysis(data):
     )
 
     show_insight(
-        "The location-crime heatmap helps identify which incident categories are concentrated in specific location groups."
+        "The heatmap highlights which incident categories are concentrated in specific location groups."
     )

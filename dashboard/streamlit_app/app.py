@@ -9,9 +9,9 @@ This file acts as the dashboard controller:
 - Applies sidebar filters
 - Filters related arrest records
 - Creates dashboard tabs
-- Calls each page module
+- Calls each dashboard section module
 
-Most page logic, chart logic, layout helpers, metrics, and data loading functions
+Most section logic, chart logic, layout helpers, metrics, and data loading functions
 are stored in separate modules to keep the app modular and maintainable.
 """
 
@@ -22,13 +22,15 @@ from components.layout import (
     show_dashboard_header
 )
 
-from pages.arrest_analysis import show_arrest_analysis
-from pages.data_quality import show_data_quality
-from pages.executive_overview import show_executive_overview
-from pages.incident_outcomes import show_incident_outcomes
-from pages.incident_trends import show_incident_trends
-from pages.location_analysis import show_location_analysis
-from pages.reporting_delay import show_reporting_delay
+from components.metrics import format_number
+
+from sections.arrest_analysis import show_arrest_analysis
+from sections.data_quality import show_data_quality
+from sections.executive_overview import show_executive_overview
+from sections.incident_outcomes import show_incident_outcomes
+from sections.incident_trends import show_incident_trends
+from sections.location_analysis import show_location_analysis
+from sections.reporting_delay import show_reporting_delay
 
 from utils.data_loader import load_dashboard_data
 
@@ -52,9 +54,33 @@ def get_month_order(data):
     return month_order["occurred_month_name"].tolist()
 
 
+def filter_if_selected(data, column, selected_values):
+    """Filter a dataframe only when selected values are provided."""
+    if not selected_values:
+        return data
+
+    return data[data[column].isin(selected_values)]
+
+
+def show_sidebar_intro(total_records):
+    """Display a clean sidebar introduction."""
+    st.sidebar.markdown("## Incident Filters")
+
+    st.sidebar.caption(
+        "Leave a filter empty to include all values. Select values only when you want to narrow the dashboard."
+    )
+
+    st.sidebar.metric(
+        "Available Records",
+        format_number(total_records)
+    )
+
+    st.sidebar.divider()
+
+
 def apply_incident_filters(data):
     """Create sidebar filters for incident data and return filtered data."""
-    st.sidebar.header("Incident Filters")
+    show_sidebar_intro(len(data))
 
     month_options = get_month_order(data)
     crime_group_options = sorted(data["crime_group"].dropna().unique().tolist())
@@ -62,43 +88,103 @@ def apply_incident_filters(data):
     location_options = sorted(data["location_group"].dropna().unique().tolist())
     semester_options = sorted(data["occurred_semester_period"].dropna().unique().tolist())
 
-    selected_months = st.sidebar.multiselect(
-        "Month",
-        options=month_options,
-        default=month_options
+    with st.sidebar.expander("Time", expanded=True):
+        selected_months = st.multiselect(
+            "Month",
+            options=month_options,
+            default=[],
+            placeholder="All months",
+            help="Leave empty to include all months."
+        )
+
+        selected_semesters = st.multiselect(
+            "Academic Period",
+            options=semester_options,
+            default=[],
+            placeholder="All academic periods",
+            help="Leave empty to include all academic periods."
+        )
+
+    with st.sidebar.expander("Incident Type", expanded=True):
+        selected_crime_groups = st.multiselect(
+            "Crime Group",
+            options=crime_group_options,
+            default=[],
+            placeholder="All crime groups",
+            help="Leave empty to include all crime groups."
+        )
+
+        selected_dispositions = st.multiselect(
+            "Outcome Group",
+            options=disposition_options,
+            default=[],
+            placeholder="All outcomes",
+            help="Leave empty to include all outcome groups."
+        )
+
+    with st.sidebar.expander("Location", expanded=False):
+        selected_locations = st.multiselect(
+            "Location Group",
+            options=location_options,
+            default=[],
+            placeholder="All location groups",
+            help="Leave empty to include all location groups."
+        )
+
+    filtered_data = data.copy()
+
+    filtered_data = filter_if_selected(
+        filtered_data,
+        "occurred_month_name",
+        selected_months
     )
 
-    selected_crime_groups = st.sidebar.multiselect(
-        "Crime Group",
-        options=crime_group_options,
-        default=crime_group_options
+    filtered_data = filter_if_selected(
+        filtered_data,
+        "occurred_semester_period",
+        selected_semesters
     )
 
-    selected_dispositions = st.sidebar.multiselect(
-        "Disposition Group",
-        options=disposition_options,
-        default=disposition_options
+    filtered_data = filter_if_selected(
+        filtered_data,
+        "crime_group",
+        selected_crime_groups
     )
 
-    selected_locations = st.sidebar.multiselect(
-        "Location Group",
-        options=location_options,
-        default=location_options
+    filtered_data = filter_if_selected(
+        filtered_data,
+        "disposition_group",
+        selected_dispositions
     )
 
-    selected_semesters = st.sidebar.multiselect(
-        "Semester Period",
-        options=semester_options,
-        default=semester_options
+    filtered_data = filter_if_selected(
+        filtered_data,
+        "location_group",
+        selected_locations
     )
 
-    filtered_data = data[
-        data["occurred_month_name"].isin(selected_months)
-        & data["crime_group"].isin(selected_crime_groups)
-        & data["disposition_group"].isin(selected_dispositions)
-        & data["location_group"].isin(selected_locations)
-        & data["occurred_semester_period"].isin(selected_semesters)
-    ]
+    st.sidebar.divider()
+
+    st.sidebar.markdown("### Current View")
+
+    st.sidebar.metric(
+        "Filtered Incidents",
+        format_number(len(filtered_data))
+    )
+
+    active_filter_count = sum(
+        [
+            bool(selected_months),
+            bool(selected_semesters),
+            bool(selected_crime_groups),
+            bool(selected_dispositions),
+            bool(selected_locations)
+        ]
+    )
+
+    st.sidebar.caption(
+        f"{active_filter_count} active filter group(s)"
+    )
 
     return filtered_data
 
@@ -166,7 +252,9 @@ def main():
     filtered_incident_data = apply_incident_filters(incident_data)
 
     if filtered_incident_data.empty:
-        st.warning("No incident records match the selected filters.")
+        st.warning(
+            "No incident records match the selected filters. Adjust the sidebar filters to continue."
+        )
         return
 
     filtered_arrest_data, filtered_match_data = filter_related_arrest_data(
@@ -177,13 +265,13 @@ def main():
 
     tab_1, tab_2, tab_3, tab_4, tab_5, tab_6, tab_7 = st.tabs(
         [
-            "Executive Overview",
-            "Incident Trends",
-            "Incident Outcomes",
-            "Reporting Delay",
-            "Location Analysis",
-            "Arrest & Charge Analysis",
-            "Data Quality"
+            "🏛️ Command Center",
+            "⏱️ Time Patterns",
+            "📍 Location Hotspots",
+            "📂 Case Outcomes",
+            "🕒 Reporting Delay",
+            "⚖️ Arrests & Charges",
+            "✅ Data Quality"
         ]
     )
 
@@ -194,13 +282,13 @@ def main():
         show_incident_trends(filtered_incident_data)
 
     with tab_3:
-        show_incident_outcomes(filtered_incident_data)
+        show_location_analysis(filtered_incident_data)
 
     with tab_4:
-        show_reporting_delay(filtered_incident_data)
+        show_incident_outcomes(filtered_incident_data)
 
     with tab_5:
-        show_location_analysis(filtered_incident_data)
+        show_reporting_delay(filtered_incident_data)
 
     with tab_6:
         show_arrest_analysis(

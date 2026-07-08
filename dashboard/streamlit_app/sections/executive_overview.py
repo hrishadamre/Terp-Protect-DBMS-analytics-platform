@@ -2,9 +2,9 @@
 executive_overview.py
 
 Purpose:
-Display the Executive Overview tab for the Terp Protect Streamlit dashboard.
+Display the Executive Overview section for the Terp Protect Streamlit dashboard.
 
-This page summarizes incident volume, arrest-related outcomes, reporting delays,
+This section summarizes incident volume, arrest-related outcomes, reporting delays,
 common crime groups, common dispositions, and high-volume location groups.
 """
 
@@ -30,11 +30,11 @@ from components.metrics import (
 
 
 def show_executive_overview(data):
-    """Display the Executive Overview tab."""
+    """Display the Executive Overview section."""
     st.subheader("Executive Overview")
 
     show_section_note(
-        "This page summarizes overall incident volume, arrest-related outcomes, reporting delay, and the most common incident categories."
+        "A quick operational summary of incident volume, outcomes, reporting delay, and high-activity categories."
     )
 
     total_incidents = len(data)
@@ -65,13 +65,13 @@ def show_executive_overview(data):
 
     card_5, card_6, card_7 = st.columns(3)
 
-    card_5.metric("Most Common Crime Group", most_common_crime_group)
-    card_6.metric("Most Common Disposition", most_common_disposition)
+    card_5.metric("Top Crime Group", most_common_crime_group)
+    card_6.metric("Top Outcome Group", most_common_disposition)
     card_7.metric("Top Location Group", top_location_group)
 
     show_insight(
-        f"In the selected records, {most_common_crime_group} is the most common crime group "
-        f"with {format_number(crime_count)} incidents. The most common disposition group is "
+        f"{most_common_crime_group} is the most common crime group with "
+        f"{format_number(crime_count)} incidents. The leading outcome group is "
         f"{most_common_disposition}."
     )
 
@@ -105,8 +105,7 @@ def show_executive_overview(data):
         )
 
         show_insight(
-            f"{most_common_crime_group} appears most frequently, making it the strongest driver "
-            f"of total incident volume in the current selection."
+            f"{most_common_crime_group} is the strongest contributor to total incident volume."
         )
 
     left_column, right_column = st.columns(2)
@@ -116,7 +115,7 @@ def show_executive_overview(data):
             create_horizontal_bar_chart(
                 data,
                 "disposition_group",
-                "Incidents by Disposition Group"
+                "Incidents by Outcome Group"
             ),
             use_container_width=True,
             key="executive_disposition_group_chart"
@@ -124,7 +123,7 @@ def show_executive_overview(data):
 
         show_insight(
             f"{most_common_disposition} is the leading outcome category, appearing in "
-            f"{format_number(disposition_count)} incident records."
+            f"{format_number(disposition_count)} records."
         )
 
     with right_column:

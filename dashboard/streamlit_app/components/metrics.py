@@ -12,6 +12,9 @@ import pandas as pd
 
 def format_number(value):
     """Format large numbers with commas."""
+    if pd.isna(value):
+        return "0"
+
     return f"{int(value):,}"
 
 

@@ -2,9 +2,9 @@
 arrest_analysis.py
 
 Purpose:
-Display the Arrest & Charge Analysis tab for the Terp Protect Streamlit dashboard.
+Display the Arrest & Charge Analysis section for the Terp Protect Streamlit dashboard.
 
-This page analyzes arrest records, charge categories, incident-to-arrest matching,
+This section analyzes arrest records, charge categories, incident-to-arrest matching,
 and descriptive demographic summaries using UMPD public arrest data.
 """
 
@@ -12,6 +12,7 @@ import plotly.express as px
 import streamlit as st
 
 from components.charts import (
+    apply_chart_theme,
     create_arrest_monthly_chart,
     create_horizontal_bar_chart
 )
@@ -29,11 +30,11 @@ from components.metrics import (
 
 
 def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_summary):
-    """Display the Arrest and Charge Analysis tab."""
+    """Display the Arrest and Charge Analysis section."""
     st.subheader("Arrest & Charge Analysis")
 
     show_section_note(
-        "This page analyzes arrest records, charge categories, and incident-to-arrest matching using UMPD case numbers."
+        "Analyze arrest records, charge categories, and incident-to-arrest matching using UMPD case numbers."
     )
 
     total_arrests = len(arrest_data)
@@ -197,10 +198,12 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
             }
         )
 
-        figure.update_layout(
-            height=430,
-            margin=dict(l=10, r=10, t=55, b=10)
+        figure.update_traces(
+            marker_line_width=0,
+            hovertemplate="<b>%{x}</b><br>Incidents: %{y}<extra></extra>"
         )
+
+        figure = apply_chart_theme(figure, height=430)
 
         st.plotly_chart(
             figure,
@@ -237,10 +240,12 @@ def show_arrest_analysis(arrest_data, match_data, charge_summary, demographic_su
                 }
             )
 
-            figure.update_layout(
-                height=430,
-                margin=dict(l=10, r=10, t=55, b=10)
+            figure.update_traces(
+                marker_line_width=0,
+                hovertemplate="<b>%{y}</b><br>Matched Incidents: %{x}<extra></extra>"
             )
+
+            figure = apply_chart_theme(figure, height=430)
 
             st.plotly_chart(
                 figure,

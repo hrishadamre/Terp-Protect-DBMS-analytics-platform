@@ -2,14 +2,16 @@
 data_quality.py
 
 Purpose:
-Display the Data Quality tab for the Terp Protect Streamlit dashboard.
+Display the Data Quality section for the Terp Protect Streamlit dashboard.
 
-This page checks whether key incident and arrest fields are valid, complete,
+This section checks whether key incident and arrest fields are valid, complete,
 and ready for analysis.
 """
 
 import plotly.express as px
 import streamlit as st
+
+from components.charts import apply_chart_theme
 
 from components.layout import (
     show_insight,
@@ -23,11 +25,11 @@ from components.metrics import (
 
 
 def show_data_quality(incident_data, arrest_data):
-    """Display the Data Quality tab."""
+    """Display the Data Quality section."""
     st.subheader("Data Quality")
 
     show_section_note(
-        "This page checks whether key incident and arrest fields are valid, complete, and ready for analysis."
+        "Validate whether key incident and arrest fields are complete, consistent, and usable for analysis."
     )
 
     total_incident_records = len(incident_data)
@@ -124,10 +126,12 @@ def show_data_quality(incident_data, arrest_data):
         }
     )
 
-    figure.update_layout(
-        height=500,
-        margin=dict(l=10, r=10, t=55, b=10)
+    figure.update_traces(
+        marker_line_width=0,
+        hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y}<extra></extra>"
     )
+
+    figure = apply_chart_theme(figure, height=500)
 
     st.plotly_chart(
         figure,

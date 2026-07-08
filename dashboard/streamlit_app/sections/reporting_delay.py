@@ -2,9 +2,9 @@
 reporting_delay.py
 
 Purpose:
-Display the Reporting Delay tab for the Terp Protect Streamlit dashboard.
+Display the Reporting Delay section for the Terp Protect Streamlit dashboard.
 
-This page measures the time between when an incident occurred and when it was reported.
+This section measures the time between when an incident occurred and when it was reported.
 It includes reporting delay buckets, average delay by crime group, average delay by
 location group, and high-delay records.
 """
@@ -30,11 +30,11 @@ from components.metrics import (
 
 
 def show_reporting_delay(data):
-    """Display the Reporting Delay tab."""
+    """Display the Reporting Delay section."""
     st.subheader("Reporting Delay Analysis")
 
     show_section_note(
-        "This page measures the time between when an incident occurred and when it was reported."
+        "Measure the time gap between when incidents occurred and when they were reported."
     )
 
     valid_delay_data = data[data["has_valid_reporting_delay"] == 1]

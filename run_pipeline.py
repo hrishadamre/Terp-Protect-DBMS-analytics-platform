@@ -113,7 +113,7 @@ def main():
     print("- dashboard/powerbi/data/")
 
     print("\nTo launch the dashboard, run:")
-    print("streamlit run dashboard/streamlit_app/app.py")
+    print("python3 -m streamlit run dashboard/streamlit_app/app.py")
 
 
 if __name__ == "__main__":
