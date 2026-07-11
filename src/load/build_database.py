@@ -2,22 +2,19 @@
 build_database.py
 
 Purpose:
-Build the Terp Protect SQLite database and load cleaned incident and arrest records.
-
-Current Scope:
-- Daily Crime and Incident Logs: 2025
-- Arrest Logs: 2025
+Build the Terp Protect SQLite database and load cleaned
+incident and arrest records for 2023, 2024, and 2025.
 
 Inputs:
-- data/processed/clean_daily_incidents_2025.csv
-- data/processed/clean_arrest_logs_2025.csv
+- data/processed/clean_daily_incidents_2023_2025.csv
+- data/processed/clean_arrest_logs_2023_2025.csv
 - sql/01_schema.sql
 
 Output:
 - data/database/terp_protect.db
 
 Role in Pipeline:
-This script belongs to the load stage. It creates the relational database schema,
+This script belongs to the load stage. It creates the database schema,
 loads dimension tables, and loads fact tables for analysis and dashboarding.
 """
 
@@ -27,13 +24,21 @@ import sqlite3
 import pandas as pd
 
 
-YEAR = 2025
+DATABASE_PATH = Path(
+    "data/database/terp_protect.db"
+)
 
-DATABASE_PATH = Path("data/database/terp_protect.db")
-SCHEMA_PATH = Path("sql/01_schema.sql")
+SCHEMA_PATH = Path(
+    "sql/01_schema.sql"
+)
 
-INCIDENT_INPUT_PATH = Path(f"data/processed/clean_daily_incidents_{YEAR}.csv")
-ARREST_INPUT_PATH = Path(f"data/processed/clean_arrest_logs_{YEAR}.csv")
+INCIDENT_INPUT_PATH = Path(
+    "data/processed/clean_daily_incidents_2023_2025.csv"
+)
+
+ARREST_INPUT_PATH = Path(
+    "data/processed/clean_arrest_logs_2023_2025.csv"
+)
 
 
 def connect_database():
@@ -43,33 +48,46 @@ def connect_database():
         exist_ok=True
     )
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(
+        DATABASE_PATH
+    )
 
-    connection.execute("PRAGMA foreign_keys = ON;")
+    connection.execute(
+        "PRAGMA foreign_keys = ON;"
+    )
 
     return connection
 
 
 def run_schema(connection):
-    """Run the database schema SQL file."""
+    """Create all database tables using the schema SQL file."""
     if not SCHEMA_PATH.exists():
-        raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
+        raise FileNotFoundError(
+            f"Schema file not found: {SCHEMA_PATH}"
+        )
 
     schema_sql = SCHEMA_PATH.read_text(
         encoding="utf-8"
     )
 
-    connection.executescript(schema_sql)
+    connection.executescript(
+        schema_sql
+    )
 
     connection.commit()
 
 
 def load_clean_incident_data():
-    """Load cleaned incident CSV."""
+    """Load the cleaned multi-year incident CSV."""
     if not INCIDENT_INPUT_PATH.exists():
-        raise FileNotFoundError(f"Incident input file not found: {INCIDENT_INPUT_PATH}")
+        raise FileNotFoundError(
+            f"Incident input file not found: "
+            f"{INCIDENT_INPUT_PATH}"
+        )
 
-    data = pd.read_csv(INCIDENT_INPUT_PATH)
+    data = pd.read_csv(
+        INCIDENT_INPUT_PATH
+    )
 
     data["occurred_datetime"] = pd.to_datetime(
         data["occurred_datetime"],
@@ -85,13 +103,21 @@ def load_clean_incident_data():
 
 
 def load_clean_arrest_data():
-    """Load cleaned arrest CSV."""
+    """Load the cleaned multi-year arrest CSV."""
     if not ARREST_INPUT_PATH.exists():
-        print(f"Arrest input file not found: {ARREST_INPUT_PATH}")
-        print("Continuing with incident data only.")
+        print(
+            f"Arrest input file not found: "
+            f"{ARREST_INPUT_PATH}"
+        )
+        print(
+            "Continuing with incident data only."
+        )
+
         return pd.DataFrame()
 
-    data = pd.read_csv(ARREST_INPUT_PATH)
+    data = pd.read_csv(
+        ARREST_INPUT_PATH
+    )
 
     data["arrested_datetime"] = pd.to_datetime(
         data["arrested_datetime"],
@@ -102,24 +128,29 @@ def load_clean_arrest_data():
 
 
 def assign_semester_period(month):
-    """Assign academic period based on month."""
-    if month in [1]:
+    """Assign an academic period based on month."""
+    if pd.isna(month):
+        return "Unknown"
+
+    month = int(month)
+
+    if month == 1:
         return "Winter Break"
 
     if month in [2, 3, 4, 5]:
-        return "Spring"
+        return "Spring Semester"
 
     if month in [6, 7, 8]:
         return "Summer"
 
     if month in [9, 10, 11, 12]:
-        return "Fall"
+        return "Fall Semester"
 
     return "Unknown"
 
 
 def assign_age_group(age):
-    """Assign broad age group for arrest demographic analysis."""
+    """Assign a broad age group for demographic analysis."""
     if pd.isna(age):
         return "Unknown"
 
@@ -139,48 +170,106 @@ def assign_age_group(age):
 
     if age <= 54:
         return "45-54"
+    
+    if age <= 64:
+        return "55-64"
 
-    return "55+"
+    return "65+"
 
 
-def create_dim_date(incident_data, arrest_data):
-    """Create date dimension from incident and arrest dates."""
+def create_dim_date(
+    incident_data,
+    arrest_data
+):
+    """Create the date dimension from all available dates."""
     incident_dates = pd.concat(
         [
-            incident_data["occurred_datetime"].dt.date,
-            incident_data["reported_datetime"].dt.date
+            incident_data[
+                "occurred_datetime"
+            ].dt.date,
+            incident_data[
+                "reported_datetime"
+            ].dt.date
         ],
         ignore_index=True
     )
 
-    date_series_list = [incident_dates]
+    date_series_list = [
+        incident_dates
+    ]
 
     if not arrest_data.empty:
-        arrest_dates = arrest_data["arrested_datetime"].dt.date
-        date_series_list.append(arrest_dates)
+        arrest_dates = arrest_data[
+            "arrested_datetime"
+        ].dt.date
+
+        date_series_list.append(
+            arrest_dates
+        )
 
     all_dates = pd.concat(
         date_series_list,
         ignore_index=True
-    ).dropna().drop_duplicates()
+    )
+
+    all_dates = (
+        all_dates
+        .dropna()
+        .drop_duplicates()
+    )
 
     dim_date = pd.DataFrame(
         {
-            "full_date": pd.to_datetime(all_dates)
+            "full_date": pd.to_datetime(
+                all_dates
+            )
         }
     )
 
-    dim_date = dim_date.sort_values("full_date").reset_index(drop=True)
+    dim_date = (
+        dim_date
+        .sort_values("full_date")
+        .reset_index(drop=True)
+    )
 
-    dim_date["year"] = dim_date["full_date"].dt.year
-    dim_date["quarter"] = dim_date["full_date"].dt.quarter
-    dim_date["month"] = dim_date["full_date"].dt.month
-    dim_date["month_name"] = dim_date["full_date"].dt.month_name()
-    dim_date["day"] = dim_date["full_date"].dt.day
-    dim_date["weekday"] = dim_date["full_date"].dt.day_name()
-    dim_date["day_of_week_number"] = dim_date["full_date"].dt.dayofweek + 1
-    dim_date["is_weekend"] = dim_date["weekday"].isin(["Saturday", "Sunday"]).astype(int)
-    dim_date["semester_period"] = dim_date["month"].apply(assign_semester_period)
+    dim_date["year"] = (
+        dim_date["full_date"].dt.year
+    )
+
+    dim_date["quarter"] = (
+        dim_date["full_date"].dt.quarter
+    )
+
+    dim_date["month"] = (
+        dim_date["full_date"].dt.month
+    )
+
+    dim_date["month_name"] = (
+        dim_date["full_date"].dt.month_name()
+    )
+
+    dim_date["day"] = (
+        dim_date["full_date"].dt.day
+    )
+
+    dim_date["weekday"] = (
+        dim_date["full_date"].dt.day_name()
+    )
+
+    dim_date["day_of_week_number"] = (
+        dim_date["full_date"].dt.dayofweek + 1
+    )
+
+    dim_date["is_weekend"] = (
+        dim_date["weekday"]
+        .isin(["Saturday", "Sunday"])
+        .astype(int)
+    )
+
+    dim_date["semester_period"] = (
+        dim_date["month"]
+        .apply(assign_semester_period)
+    )
 
     dim_date.insert(
         0,
@@ -188,15 +277,25 @@ def create_dim_date(incident_data, arrest_data):
         range(1, len(dim_date) + 1)
     )
 
-    dim_date["full_date"] = dim_date["full_date"].dt.date.astype(str)
+    dim_date["full_date"] = (
+        dim_date["full_date"]
+        .dt.date
+        .astype(str)
+    )
 
     return dim_date
 
 
 def create_dim_crime_type(incident_data):
-    """Create crime type dimension."""
+    """Create the crime type dimension."""
     dim_crime_type = (
-        incident_data[["crime_type", "crime_group", "source_type"]]
+        incident_data[
+            [
+                "crime_type",
+                "crime_group",
+                "source_type"
+            ]
+        ]
         .drop_duplicates()
         .reset_index(drop=True)
     )
@@ -204,14 +303,17 @@ def create_dim_crime_type(incident_data):
     dim_crime_type.insert(
         0,
         "crime_type_id",
-        range(1, len(dim_crime_type) + 1)
+        range(
+            1,
+            len(dim_crime_type) + 1
+        )
     )
 
     return dim_crime_type
 
 
 def create_dim_disposition(incident_data):
-    """Create disposition dimension from incident disposition fields."""
+    """Create the disposition dimension."""
     data = incident_data.copy()
 
     data["is_arrest_related"] = (
@@ -255,34 +357,48 @@ def create_dim_disposition(incident_data):
     dim_disposition.insert(
         0,
         "disposition_id",
-        range(1, len(dim_disposition) + 1)
+        range(
+            1,
+            len(dim_disposition) + 1
+        )
     )
 
     return dim_disposition
 
 
 def create_dim_location(incident_data):
-    """Create location dimension."""
+    """Create the location dimension."""
     dim_location = (
-        incident_data[["location_raw", "location_group"]]
+        incident_data[
+            [
+                "location_raw",
+                "location_group"
+            ]
+        ]
         .drop_duplicates()
         .reset_index(drop=True)
     )
 
-    dim_location["jurisdiction_group"] = "Unknown"
+    dim_location["jurisdiction_group"] = (
+        "Unknown"
+    )
+
     dim_location["is_on_campus"] = None
 
     dim_location.insert(
         0,
         "location_id",
-        range(1, len(dim_location) + 1)
+        range(
+            1,
+            len(dim_location) + 1
+        )
     )
 
     return dim_location
 
 
 def create_dim_demographic(arrest_data):
-    """Create demographic dimension from arrest data."""
+    """Create the demographic dimension."""
     if arrest_data.empty:
         return pd.DataFrame(
             columns=[
@@ -295,10 +411,19 @@ def create_dim_demographic(arrest_data):
 
     data = arrest_data.copy()
 
-    data["age_group"] = data["age"].apply(assign_age_group)
+    data["age_group"] = (
+        data["age"]
+        .apply(assign_age_group)
+    )
 
     dim_demographic = (
-        data[["race", "sex", "age_group"]]
+        data[
+            [
+                "race",
+                "sex",
+                "age_group"
+            ]
+        ]
         .drop_duplicates()
         .reset_index(drop=True)
     )
@@ -306,14 +431,17 @@ def create_dim_demographic(arrest_data):
     dim_demographic.insert(
         0,
         "demographic_id",
-        range(1, len(dim_demographic) + 1)
+        range(
+            1,
+            len(dim_demographic) + 1
+        )
     )
 
     return dim_demographic
 
 
 def create_dim_charge_category(arrest_data):
-    """Create charge category dimension from arrest data."""
+    """Create the charge category dimension."""
     if arrest_data.empty:
         return pd.DataFrame(
             columns=[
@@ -334,7 +462,10 @@ def create_dim_charge_category(arrest_data):
                 "is_theft_related"
             ]
         ]
-        .groupby("charge_category", as_index=False)
+        .groupby(
+            "charge_category",
+            as_index=False
+        )
         .agg(
             {
                 "is_alcohol_related": "max",
@@ -348,14 +479,21 @@ def create_dim_charge_category(arrest_data):
     dim_charge_category.insert(
         0,
         "charge_category_id",
-        range(1, len(dim_charge_category) + 1)
+        range(
+            1,
+            len(dim_charge_category) + 1
+        )
     )
 
     return dim_charge_category
 
 
-def load_table(connection, table_name, data):
-    """Load a dataframe into SQLite."""
+def load_table(
+    connection,
+    table_name,
+    data
+):
+    """Load a DataFrame into a SQLite table."""
     data.to_sql(
         table_name,
         connection,
@@ -365,7 +503,7 @@ def load_table(connection, table_name, data):
 
 
 def build_date_lookup(dim_date):
-    """Build date lookup dictionary."""
+    """Create a dictionary that maps dates to date IDs."""
     return dict(
         zip(
             dim_date["full_date"],
@@ -374,29 +512,58 @@ def build_date_lookup(dim_date):
     )
 
 
-def build_incident_fact(incident_data, dim_date, dim_crime_type, dim_disposition, dim_location):
-    """Build fact_incident table."""
+def build_incident_fact(
+    incident_data,
+    dim_date,
+    dim_crime_type,
+    dim_disposition,
+    dim_location
+):
+    """Build the incident fact table."""
     data = incident_data.copy()
 
-    date_lookup = build_date_lookup(dim_date)
+    date_lookup = build_date_lookup(
+        dim_date
+    )
 
     crime_lookup = {
-        (row["crime_type"], row["crime_group"], row["source_type"]): row["crime_type_id"]
+        (
+            row["crime_type"],
+            row["crime_group"],
+            row["source_type"]
+        ): row["crime_type_id"]
         for _, row in dim_crime_type.iterrows()
     }
 
     disposition_lookup = {
-        (row["disposition"], row["disposition_group"]): row["disposition_id"]
+        (
+            row["disposition"],
+            row["disposition_group"]
+        ): row["disposition_id"]
         for _, row in dim_disposition.iterrows()
     }
 
     location_lookup = {
-        (row["location_raw"], row["location_group"]): row["location_id"]
+        (
+            row["location_raw"],
+            row["location_group"]
+        ): row["location_id"]
         for _, row in dim_location.iterrows()
     }
 
-    data["occurred_date_id"] = data["occurred_datetime"].dt.date.astype(str).map(date_lookup)
-    data["reported_date_id"] = data["reported_datetime"].dt.date.astype(str).map(date_lookup)
+    data["occurred_date_id"] = (
+        data["occurred_datetime"]
+        .dt.date
+        .astype(str)
+        .map(date_lookup)
+    )
+
+    data["reported_date_id"] = (
+        data["reported_datetime"]
+        .dt.date
+        .astype(str)
+        .map(date_lookup)
+    )
 
     data["crime_type_id"] = data.apply(
         lambda row: crime_lookup.get(
@@ -444,6 +611,8 @@ def build_incident_fact(incident_data, dim_date, dim_crime_type, dim_disposition
             "report_delay_days",
             "delay_bucket",
             "hour",
+            "source_year",
+            "source_month",
             "source_type",
             "source_url",
             "scraped_at",
@@ -457,8 +626,13 @@ def build_incident_fact(incident_data, dim_date, dim_crime_type, dim_disposition
     return fact_incident
 
 
-def build_arrest_fact(arrest_data, dim_date, dim_demographic, dim_charge_category):
-    """Build fact_arrest table."""
+def build_arrest_fact(
+    arrest_data,
+    dim_date,
+    dim_demographic,
+    dim_charge_category
+):
+    """Build the arrest fact table."""
     if arrest_data.empty:
         return pd.DataFrame(
             columns=[
@@ -483,21 +657,36 @@ def build_arrest_fact(arrest_data, dim_date, dim_demographic, dim_charge_categor
 
     data = arrest_data.copy()
 
-    date_lookup = build_date_lookup(dim_date)
+    date_lookup = build_date_lookup(
+        dim_date
+    )
 
     demographic_lookup = {
-        (row["race"], row["sex"], row["age_group"]): row["demographic_id"]
+        (
+            row["race"],
+            row["sex"],
+            row["age_group"]
+        ): row["demographic_id"]
         for _, row in dim_demographic.iterrows()
     }
 
     charge_lookup = {
-        row["charge_category"]: row["charge_category_id"]
+        row["charge_category"]:
+        row["charge_category_id"]
         for _, row in dim_charge_category.iterrows()
     }
 
-    data["age_group"] = data["age"].apply(assign_age_group)
+    data["age_group"] = (
+        data["age"]
+        .apply(assign_age_group)
+    )
 
-    data["arrest_date_id"] = data["arrested_datetime"].dt.date.astype(str).map(date_lookup)
+    data["arrest_date_id"] = (
+        data["arrested_datetime"]
+        .dt.date
+        .astype(str)
+        .map(date_lookup)
+    )
 
     data["demographic_id"] = data.apply(
         lambda row: demographic_lookup.get(
@@ -510,7 +699,10 @@ def build_arrest_fact(arrest_data, dim_date, dim_demographic, dim_charge_categor
         axis=1
     )
 
-    data["charge_category_id"] = data["charge_category"].map(charge_lookup)
+    data["charge_category_id"] = (
+        data["charge_category"]
+        .map(charge_lookup)
+    )
 
     fact_arrest = data[
         [
@@ -537,7 +729,7 @@ def build_arrest_fact(arrest_data, dim_date, dim_demographic, dim_charge_categor
 
 
 def print_table_counts(connection):
-    """Print database table row counts."""
+    """Print the number of rows in each database table."""
     table_names = [
         "dim_date",
         "dim_crime_type",
@@ -557,46 +749,176 @@ def print_table_counts(connection):
             f"SELECT COUNT(*) FROM {table_name};"
         ).fetchone()[0]
 
-        print(f"- {table_name}: {count:,}")
+        print(
+            f"- {table_name}: {count:,}"
+        )
+
+
+def print_year_counts(connection):
+    """Print incident and arrest counts by year."""
+    print("")
+    print("Incident records by year:")
+
+    incident_counts = connection.execute(
+        """
+        SELECT source_year, COUNT(*)
+        FROM fact_incident
+        GROUP BY source_year
+        ORDER BY source_year;
+        """
+    ).fetchall()
+
+    for year, count in incident_counts:
+        print(
+            f"- {year}: {count:,}"
+        )
+
+    print("")
+    print("Arrest records by year:")
+
+    arrest_counts = connection.execute(
+        """
+        SELECT source_year, COUNT(*)
+        FROM fact_arrest
+        GROUP BY source_year
+        ORDER BY source_year;
+        """
+    ).fetchall()
+
+    for year, count in arrest_counts:
+        print(
+            f"- {year}: {count:,}"
+        )
 
 
 def main():
-    """Build and load the SQLite database."""
-    print("Building Terp Protect database...")
+    """Build and load the Terp Protect SQLite database."""
+    print(
+        "Building Terp Protect database..."
+    )
 
     connection = connect_database()
 
     try:
-        print("Running schema...")
-        run_schema(connection)
+        print(
+            "Running database schema..."
+        )
 
-        print("Loading cleaned incident data...")
-        incident_data = load_clean_incident_data()
+        run_schema(
+            connection
+        )
 
-        print("Loading cleaned arrest data...")
-        arrest_data = load_clean_arrest_data()
+        print(
+            "Loading cleaned incident data..."
+        )
 
-        print("Creating dimension tables...")
-        dim_date = create_dim_date(incident_data, arrest_data)
-        dim_crime_type = create_dim_crime_type(incident_data)
-        dim_disposition = create_dim_disposition(incident_data)
-        dim_location = create_dim_location(incident_data)
-        dim_demographic = create_dim_demographic(arrest_data)
-        dim_charge_category = create_dim_charge_category(arrest_data)
+        incident_data = (
+            load_clean_incident_data()
+        )
 
-        print("Loading dimension tables...")
-        load_table(connection, "dim_date", dim_date)
-        load_table(connection, "dim_crime_type", dim_crime_type)
-        load_table(connection, "dim_disposition", dim_disposition)
-        load_table(connection, "dim_location", dim_location)
+        print(
+            f"Loaded {len(incident_data):,} "
+            f"incident records."
+        )
+
+        print(
+            "Loading cleaned arrest data..."
+        )
+
+        arrest_data = (
+            load_clean_arrest_data()
+        )
+
+        print(
+            f"Loaded {len(arrest_data):,} "
+            f"arrest records."
+        )
+
+        print(
+            "Creating dimension tables..."
+        )
+
+        dim_date = create_dim_date(
+            incident_data,
+            arrest_data
+        )
+
+        dim_crime_type = (
+            create_dim_crime_type(
+                incident_data
+            )
+        )
+
+        dim_disposition = (
+            create_dim_disposition(
+                incident_data
+            )
+        )
+
+        dim_location = (
+            create_dim_location(
+                incident_data
+            )
+        )
+
+        dim_demographic = (
+            create_dim_demographic(
+                arrest_data
+            )
+        )
+
+        dim_charge_category = (
+            create_dim_charge_category(
+                arrest_data
+            )
+        )
+
+        print(
+            "Loading dimension tables..."
+        )
+
+        load_table(
+            connection,
+            "dim_date",
+            dim_date
+        )
+
+        load_table(
+            connection,
+            "dim_crime_type",
+            dim_crime_type
+        )
+
+        load_table(
+            connection,
+            "dim_disposition",
+            dim_disposition
+        )
+
+        load_table(
+            connection,
+            "dim_location",
+            dim_location
+        )
 
         if not dim_demographic.empty:
-            load_table(connection, "dim_demographic", dim_demographic)
+            load_table(
+                connection,
+                "dim_demographic",
+                dim_demographic
+            )
 
         if not dim_charge_category.empty:
-            load_table(connection, "dim_charge_category", dim_charge_category)
+            load_table(
+                connection,
+                "dim_charge_category",
+                dim_charge_category
+            )
 
-        print("Creating fact tables...")
+        print(
+            "Creating fact tables..."
+        )
+
         fact_incident = build_incident_fact(
             incident_data,
             dim_date,
@@ -612,18 +934,38 @@ def main():
             dim_charge_category
         )
 
-        print("Loading fact tables...")
-        load_table(connection, "fact_incident", fact_incident)
+        print(
+            "Loading fact tables..."
+        )
+
+        load_table(
+            connection,
+            "fact_incident",
+            fact_incident
+        )
 
         if not fact_arrest.empty:
-            load_table(connection, "fact_arrest", fact_arrest)
+            load_table(
+                connection,
+                "fact_arrest",
+                fact_arrest
+            )
 
         connection.commit()
 
-        print_table_counts(connection)
+        print_table_counts(
+            connection
+        )
+
+        print_year_counts(
+            connection
+        )
 
         print("")
-        print(f"Database built successfully at: {DATABASE_PATH}")
+        print(
+            f"Database built successfully at: "
+            f"{DATABASE_PATH}"
+        )
 
     finally:
         connection.close()

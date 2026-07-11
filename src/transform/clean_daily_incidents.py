@@ -2,32 +2,41 @@
 clean_daily_incidents.py
 
 Purpose:
-Clean and standardize UMPD Daily Crime and Incident Log records collected from public monthly webpages.
+Clean and standardize UMPD Daily Crime and Incident Log records
+for the years 2023, 2024, and 2025.
 
 Current Scope:
 - Source: UMPD Daily Crime and Incident Logs
-- Year: 2025
-- Input: data/raw/daily_incident_logs_2025.csv
-- Output: data/processed/clean_daily_incidents_2025.csv
-- Summary Report: reports/daily_incident_cleaning_summary_2025.md
+- Years: 2023 through 2025
+- Input: data/raw/daily_incident_logs_2023_2025.csv
+- Output: data/processed/clean_daily_incidents_2023_2025.csv
+- Summary Report: reports/daily_incident_cleaning_summary_2023_2025.md
 
 Role in Pipeline:
-This script belongs to the transform stage. It converts raw scraped fields into structured,
-analysis-ready columns for database loading, SQL analysis, dashboards, and future modeling.
+This script belongs to the transform stage. It converts raw scraped fields
+into structured, analysis-ready columns for database loading, SQL analysis,
+dashboards, and future modeling.
 """
 
 from pathlib import Path
 from datetime import datetime
 import re
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
-RAW_INPUT_PATH = Path("data/raw/daily_incident_logs_2025.csv")
-CLEAN_OUTPUT_PATH = Path("data/processed/clean_daily_incidents_2025.csv")
-SUMMARY_OUTPUT_PATH = Path("reports/daily_incident_cleaning_summary_2025.md")
+RAW_INPUT_PATH = Path(
+    "data/raw/daily_incident_logs_2023_2025.csv"
+)
 
-PROJECT_YEAR = 2025
+CLEAN_OUTPUT_PATH = Path(
+    "data/processed/clean_daily_incidents_2023_2025.csv"
+)
+
+SUMMARY_OUTPUT_PATH = Path(
+    "reports/daily_incident_cleaning_summary_2023_2025.md"
+)
 
 
 def clean_text(value):
@@ -42,6 +51,11 @@ def clean_text(value):
         return np.nan
 
     return value
+
+
+def contains_any(text, keywords):
+    """Return True when the text contains at least one keyword."""
+    return any(keyword in text for keyword in keywords)
 
 
 def standardize_case_number(value):
@@ -61,7 +75,11 @@ def parse_occurred_datetime(value):
     if pd.isna(value):
         return pd.NaT
 
-    return pd.to_datetime(value, format="%m/%d/%Y %H:%M:%S", errors="coerce")
+    return pd.to_datetime(
+        value,
+        format="%m/%d/%Y %H:%M:%S",
+        errors="coerce"
+    )
 
 
 def parse_reported_datetime(value):
@@ -73,11 +91,15 @@ def parse_reported_datetime(value):
 
     value = value.replace(" - ", " ")
 
-    return pd.to_datetime(value, format="%m/%d/%Y %H:%M", errors="coerce")
+    return pd.to_datetime(
+        value,
+        format="%m/%d/%Y %H:%M",
+        errors="coerce"
+    )
 
 
 def assign_semester_period(month):
-    """Assign a broad academic period based on the incident month."""
+    """Assign a broad academic period based on month."""
     if pd.isna(month):
         return "Unknown"
 
@@ -99,68 +121,259 @@ def assign_semester_period(month):
 
 
 def standardize_crime_type(value):
-    """Clean the raw crime type text."""
+    """Clean the crime type while preserving the source wording."""
     value = clean_text(value)
 
     if pd.isna(value):
         return "Unknown"
 
-    return value.title()
+    return value
 
 
 def assign_crime_group(crime_type):
-    """Map detailed crime types into broader analytical groups."""
+    """Map detailed incident types into broader analytical groups."""
     value = clean_text(crime_type)
 
     if pd.isna(value):
         return "Unknown"
 
-    value_lower = value.lower()
+    text = value.lower()
 
-    if any(keyword in value_lower for keyword in ["dwi", "dui", "driving while impaired"]):
-        return "DUI / Traffic Alcohol"
+    if contains_any(
+        text,
+        [
+            "dwi",
+            "dui",
+            "driving while impaired"
+        ]
+    ):
+        return "DUI / Impaired Driving"
 
-    if any(keyword in value_lower for keyword in ["theft", "larceny", "stolen", "shoplifting"]):
-        return "Theft / Property"
+    if contains_any(
+        text,
+        [
+            "sex offense",
+            "rape",
+            "indecent exposure",
+            "peeping tom",
+            "pornography",
+            "obscene material",
+            "title ix"
+        ]
+    ):
+        return "Sex Offense / Title IX"
 
-    if any(keyword in value_lower for keyword in ["assault", "fight", "battery"]):
-        return "Assault / Violence"
+    if contains_any(
+        text,
+        [
+            "weapon violation",
+            "firearm",
+            "handgun",
+            "knife",
+            "weapon"
+        ]
+    ):
+        return "Weapon-Related"
 
-    if any(keyword in value_lower for keyword in ["burglary", "robbery", "breaking"]):
+    if contains_any(
+        text,
+        [
+            "burglary",
+            "robbery",
+            "carjacking",
+            "breaking and entering"
+        ]
+    ):
         return "Burglary / Robbery"
 
-    if any(keyword in value_lower for keyword in ["cds", "drug", "narcotic", "marijuana", "controlled"]):
-        return "Drug / CDS"
+    if contains_any(
+        text,
+        [
+            "theft",
+            "larceny",
+            "stolen motor vehicle",
+            "stolen property",
+            "shoplifting",
+            "vehicle tampering"
+        ]
+    ):
+        return "Theft / Property"
 
-    if any(keyword in value_lower for keyword in ["sex", "sexual", "rape"]):
-        return "Sex Offense"
+    if contains_any(
+        text,
+        [
+            "lost property",
+            "found/recovered property",
+            "recovered stolen property",
+            "recovered stolen motor vehicle"
+        ]
+    ):
+        return "Lost / Recovered Property"
 
-    if any(keyword in value_lower for keyword in ["traffic", "vehicle", "accident", "crash", "hit and run"]):
-        return "Traffic / Vehicle"
-
-    if any(keyword in value_lower for keyword in ["disorderly", "disturbance", "trespass", "trespassing"]):
-        return "Public Order"
-
-    if any(keyword in value_lower for keyword in ["fraud", "identity", "forgery", "scam"]):
-        return "Fraud / Identity"
-
-    if any(keyword in value_lower for keyword in ["property damage", "malicious destruction", "vandalism"]):
+    if contains_any(
+        text,
+        [
+            "vandalism",
+            "damage to state property",
+            "dept property damage",
+            "damaged property",
+            "property damage",
+            "malicious destruction"
+        ]
+    ):
         return "Property Damage"
 
-    if any(keyword in value_lower for keyword in ["assist", "suspicious", "check", "information"]):
+    if contains_any(
+        text,
+        [
+            "assault",
+            "domestic",
+            "cutting",
+            "stabbing",
+            "reckless endangerment",
+            "fight",
+            "battery"
+        ]
+    ):
+        return "Assault / Violence"
+
+    if contains_any(
+        text,
+        [
+            "harassment",
+            "stalking",
+            "threat assessment",
+            "hate bias incident",
+            "telephone/email misuse",
+            "telephone/email",
+            "extortion"
+        ]
+    ):
+        return "Harassment / Threats"
+
+    if contains_any(
+        text,
+        [
+            "cds violation",
+            "drug",
+            "narcotic",
+            "marijuana",
+            "cannabis",
+            "controlled dangerous substance",
+            "overdose"
+        ]
+    ):
+        return "Drug / CDS"
+
+    if contains_any(
+        text,
+        [
+            "alcohol violation"
+        ]
+    ):
+        return "Alcohol Violation"
+
+    if contains_any(
+        text,
+        [
+            "fraud",
+            "identity theft",
+            "forgery",
+            "embezzlement",
+            "false report",
+            "false statement",
+            "scam"
+        ]
+    ):
+        return "Fraud / Financial Crime"
+
+    if contains_any(
+        text,
+        [
+            "traffic offense",
+            "traffic arrest",
+            "accident",
+            "pedestrian struck",
+            "hit and run"
+        ]
+    ):
+        return "Traffic / Vehicle"
+
+    if contains_any(
+        text,
+        [
+            "disorderly conduct",
+            "trespassing",
+            "resisting arrest",
+            "noise complaint",
+            "juvenile offense",
+            "disturbance"
+        ]
+    ):
+        return "Public Order"
+
+    if contains_any(
+        text,
+        [
+            "injured/sick person",
+            "injured officer",
+            "check on the welfare",
+            "emergency petition",
+            "death investigation",
+            "suicide",
+            "missing person",
+            "runaway"
+        ]
+    ):
+        return "Medical / Welfare"
+
+    if contains_any(
+        text,
+        [
+            "fire",
+            "hazardous condition",
+            "alarm"
+        ]
+    ):
+        return "Fire / Hazard"
+
+    if contains_any(
+        text,
+        [
+            "assist other agency",
+            "assist fire department",
+            "police information",
+            "other service call",
+            "suspicious activity",
+            "suspicious person",
+            "animal complaint"
+        ]
+    ):
         return "Service / Assistance"
+
+    if contains_any(
+        text,
+        [
+            "warrant",
+            "summons service"
+        ]
+    ):
+        return "Warrant / Summons Service"
+
+    if "other incident" in text:
+        return "Other Incident"
 
     return "Other"
 
 
 def standardize_disposition(value):
-    """Clean the raw disposition text."""
+    """Clean disposition text while preserving the source wording."""
     value = clean_text(value)
 
     if pd.isna(value):
         return "Unknown"
 
-    return value.title()
+    return value
 
 
 def assign_disposition_group(disposition):
@@ -170,37 +383,95 @@ def assign_disposition_group(disposition):
     if pd.isna(value):
         return "Unknown"
 
-    value_lower = value.lower()
+    text = value.lower()
 
-    if "arrest" in value_lower:
+    if "arrest" in text:
         return "Arrest"
 
-    if any(keyword in value_lower for keyword in ["cbe", "closed", "cleared", "exceptionally cleared"]):
+    if contains_any(
+        text,
+        [
+            "cbe",
+            "closed",
+            "cleared",
+            "exceptionally cleared"
+        ]
+    ):
         return "Closed / Cleared"
 
-    if any(keyword in value_lower for keyword in ["pending", "active", "open", "investigation"]):
+    if contains_any(
+        text,
+        [
+            "investigation pending",
+            "active/pending",
+            "pending",
+            "active",
+            "open"
+        ]
+    ):
         return "Pending / Active"
 
-    if "unfounded" in value_lower:
+    if "unfounded" in text:
         return "Unfounded"
 
-    if any(keyword in value_lower for keyword in ["referred", "referral", "judicial"]):
+    if contains_any(
+        text,
+        [
+            "summons issued",
+            "warrant issued"
+        ]
+    ):
+        return "Summons / Warrant Issued"
+
+    if contains_any(
+        text,
+        [
+            "referred",
+            "referral",
+            "judicial"
+        ]
+    ):
         return "Referred"
 
-    if any(keyword in value_lower for keyword in ["inactive", "suspended"]):
+    if contains_any(
+        text,
+        [
+            "inactive",
+            "suspended"
+        ]
+    ):
         return "Inactive / Suspended"
 
     return "Other"
 
 
 def standardize_location(value):
-    """Clean the raw location text."""
+    """Clean location text while preserving names and abbreviations."""
     value = clean_text(value)
 
     if pd.isna(value):
         return "Unknown"
 
-    return value.title()
+    return value
+
+
+def has_roadway_term(text):
+    """Check for common roadway words using complete words."""
+    roadway_pattern = (
+        r"\b("
+        r"road|rd|avenue|ave|boulevard|blvd|street|st|"
+        r"drive|dr|lane|ln|court|ct|parkway|pkwy|"
+        r"highway|hwy|route"
+        r")\b"
+    )
+
+    return bool(
+        re.search(
+            roadway_pattern,
+            text,
+            flags=re.IGNORECASE
+        )
+    )
 
 
 def assign_location_group(location):
@@ -210,35 +481,105 @@ def assign_location_group(location):
     if pd.isna(value):
         return "Unknown"
 
-    value_lower = value.lower()
+    text = value.lower()
 
-    if any(keyword in value_lower for keyword in ["rd", "road", "ave", "blvd", "street", "st ", "drive", "dr ", "lane"]):
-        return "Roadway / Street"
-
-    if any(keyword in value_lower for keyword in ["parking", "garage", "lot"]):
+    if contains_any(
+        text,
+        [
+            "parking",
+            "parking garage",
+            "garage",
+            "lot ",
+            "lot,"
+        ]
+    ):
         return "Parking Area"
 
-    if any(keyword in value_lower for keyword in ["hall", "dorm", "residence", "commons", "apartment"]):
+    if contains_any(
+        text,
+        [
+            "hall",
+            "dorm",
+            "residence",
+            "commons",
+            "apartment",
+            "fraternity",
+            "sorority",
+            "greek"
+        ]
+    ):
         return "Residence / Housing"
 
-    if any(keyword in value_lower for keyword in ["library", "center", "building", "school", "college", "lab"]):
-        return "Academic / Campus Building"
-
-    if any(keyword in value_lower for keyword in ["stadium", "field", "recreation", "gym", "arena"]):
+    if contains_any(
+        text,
+        [
+            "stadium",
+            "field",
+            "recreation",
+            "gym",
+            "arena",
+            "golf course",
+            "tennis",
+            "athletic"
+        ]
+    ):
         return "Athletic / Recreation"
 
-    if any(keyword in value_lower for keyword in ["fraternity", "sorority", "greek"]):
-        return "Greek Life"
+    if contains_any(
+        text,
+        [
+            "library",
+            "center",
+            "building",
+            "school",
+            "college",
+            "laboratory",
+            " lab",
+            "classroom",
+            "student union",
+            "stamp",
+            "chapel"
+        ]
+    ):
+        return "Campus Building / Facility"
 
-    if any(keyword in value_lower for keyword in ["unknown", "n/a", "not available"]):
+    if contains_any(
+        text,
+        [
+            "police",
+            "umpd",
+            "umdps",
+            "health center",
+            "fire department"
+        ]
+    ):
+        return "Campus Service / Administrative"
+
+    if contains_any(
+        text,
+        [
+            "unknown",
+            "n/a",
+            "not available"
+        ]
+    ):
         return "Unknown"
+
+    if has_roadway_term(text):
+        return "Roadway / Street"
 
     return "Other Campus / Nearby Area"
 
 
-def calculate_reporting_delay_hours(occurred_datetime, reported_datetime):
-    """Calculate reporting delay in hours."""
-    if pd.isna(occurred_datetime) or pd.isna(reported_datetime):
+def calculate_reporting_delay_hours(
+    occurred_datetime,
+    reported_datetime
+):
+    """Calculate the reporting delay in hours."""
+    if (
+        pd.isna(occurred_datetime)
+        or pd.isna(reported_datetime)
+    ):
         return np.nan
 
     delay = reported_datetime - occurred_datetime
@@ -267,21 +608,100 @@ def assign_delay_bucket(delay_hours):
     return "Over 7 Days"
 
 
+def add_incident_ids(clean_df):
+    """Create a unique incident ID within each source year."""
+    clean_df["record_number"] = (
+        clean_df.groupby("source_year").cumcount() + 1
+    )
+
+    clean_df["incident_id"] = (
+        "INC"
+        + clean_df["source_year"].astype("Int64").astype(str)
+        + "_"
+        + clean_df["record_number"]
+        .astype(str)
+        .str.zfill(6)
+    )
+
+    return clean_df.drop(
+        columns=["record_number"]
+    )
+
+
 def build_clean_dataset(df):
-    """Apply all cleaning and feature engineering steps."""
+    """Apply all cleaning and feature-engineering steps."""
     clean_df = df.copy()
 
-    clean_df = clean_df.drop_duplicates().reset_index(drop=True)
-
-    clean_df["incident_id"] = [
-        f"INC{PROJECT_YEAR}_{str(index + 1).zfill(6)}"
-        for index in range(len(clean_df))
+    text_columns = [
+        "case_number",
+        "occurred_datetime_raw",
+        "reported_datetime_raw",
+        "crime_type_raw",
+        "disposition_raw",
+        "location_raw",
+        "source_url",
+        "scraped_at"
     ]
 
-    clean_df["case_number"] = clean_df["case_number"].apply(standardize_case_number)
+    for column in text_columns:
+        clean_df[column] = clean_df[column].apply(
+            clean_text
+        )
 
-    clean_df["occurred_datetime"] = clean_df["occurred_datetime_raw"].apply(parse_occurred_datetime)
-    clean_df["reported_datetime"] = clean_df["reported_datetime_raw"].apply(parse_reported_datetime)
+    duplicate_columns = [
+        "source_year",
+        "source_month",
+        "case_number",
+        "occurred_datetime_raw",
+        "reported_datetime_raw",
+        "crime_type_raw",
+        "disposition_raw",
+        "location_raw"
+    ]
+
+    clean_df = (
+        clean_df
+        .drop_duplicates(subset=duplicate_columns)
+        .reset_index(drop=True)
+    )
+
+    clean_df["source_year"] = pd.to_numeric(
+        clean_df["source_year"],
+        errors="coerce"
+    ).astype("Int64")
+
+    clean_df["source_month"] = pd.to_numeric(
+        clean_df["source_month"],
+        errors="coerce"
+    ).astype("Int64")
+
+    clean_df["case_number"] = (
+        clean_df["case_number"]
+        .apply(standardize_case_number)
+    )
+
+    clean_df["occurred_datetime"] = (
+        clean_df["occurred_datetime_raw"]
+        .apply(parse_occurred_datetime)
+    )
+
+    clean_df["reported_datetime"] = (
+        clean_df["reported_datetime_raw"]
+        .apply(parse_reported_datetime)
+    )
+
+    clean_df = clean_df.sort_values(
+        by=[
+            "source_year",
+            "source_month",
+            "occurred_datetime",
+            "case_number"
+        ]
+    ).reset_index(drop=True)
+
+    clean_df = add_incident_ids(
+        clean_df
+    )
 
     clean_df["report_delay_hours"] = clean_df.apply(
         lambda row: calculate_reporting_delay_hours(
@@ -291,32 +711,104 @@ def build_clean_dataset(df):
         axis=1
     )
 
-    clean_df["report_delay_days"] = (clean_df["report_delay_hours"] / 24).round(2)
-    clean_df["delay_bucket"] = clean_df["report_delay_hours"].apply(assign_delay_bucket)
+    clean_df["report_delay_days"] = (
+        clean_df["report_delay_hours"] / 24
+    ).round(2)
 
-    clean_df["crime_type"] = clean_df["crime_type_raw"].apply(standardize_crime_type)
-    clean_df["crime_group"] = clean_df["crime_type"].apply(assign_crime_group)
+    clean_df["delay_bucket"] = (
+        clean_df["report_delay_hours"]
+        .apply(assign_delay_bucket)
+    )
 
-    clean_df["disposition"] = clean_df["disposition_raw"].apply(standardize_disposition)
-    clean_df["disposition_group"] = clean_df["disposition"].apply(assign_disposition_group)
+    clean_df["crime_type"] = (
+        clean_df["crime_type_raw"]
+        .apply(standardize_crime_type)
+    )
 
-    clean_df["location_raw"] = clean_df["location_raw"].apply(standardize_location)
-    clean_df["location_group"] = clean_df["location_raw"].apply(assign_location_group)
+    clean_df["crime_group"] = (
+        clean_df["crime_type"]
+        .apply(assign_crime_group)
+    )
 
-    clean_df["year"] = clean_df["occurred_datetime"].dt.year
-    clean_df["month"] = clean_df["occurred_datetime"].dt.month
-    clean_df["month_name"] = clean_df["occurred_datetime"].dt.month_name()
-    clean_df["weekday"] = clean_df["occurred_datetime"].dt.day_name()
-    clean_df["hour"] = clean_df["occurred_datetime"].dt.hour
-    clean_df["is_weekend"] = clean_df["weekday"].isin(["Saturday", "Sunday"])
-    clean_df["semester_period"] = clean_df["month"].apply(assign_semester_period)
+    clean_df["disposition"] = (
+        clean_df["disposition_raw"]
+        .apply(standardize_disposition)
+    )
 
-    clean_df["source_type"] = "Daily Crime and Incident Log"
+    clean_df["disposition_group"] = (
+        clean_df["disposition"]
+        .apply(assign_disposition_group)
+    )
 
-    clean_df["has_valid_case_number"] = clean_df["case_number"].notna()
-    clean_df["has_valid_occurred_datetime"] = clean_df["occurred_datetime"].notna()
-    clean_df["has_valid_reported_datetime"] = clean_df["reported_datetime"].notna()
-    clean_df["has_valid_reporting_delay"] = clean_df["report_delay_hours"].notna()
+    clean_df["location_raw"] = (
+        clean_df["location_raw"]
+        .apply(standardize_location)
+    )
+
+    clean_df["location_group"] = (
+        clean_df["location_raw"]
+        .apply(assign_location_group)
+    )
+
+    clean_df["year"] = (
+        clean_df["occurred_datetime"].dt.year
+    )
+
+    clean_df["month"] = (
+        clean_df["occurred_datetime"].dt.month
+    )
+
+    clean_df["month_name"] = (
+        clean_df["occurred_datetime"].dt.month_name()
+    )
+
+    clean_df["weekday"] = (
+        clean_df["occurred_datetime"].dt.day_name()
+    )
+
+    clean_df["hour"] = (
+        clean_df["occurred_datetime"].dt.hour
+    )
+
+    clean_df["is_weekend"] = (
+        clean_df["weekday"]
+        .isin(["Saturday", "Sunday"])
+        .astype(int)
+    )
+
+    clean_df["semester_period"] = (
+        clean_df["month"]
+        .apply(assign_semester_period)
+    )
+
+    clean_df["source_type"] = (
+        "Daily Crime and Incident Log"
+    )
+
+    clean_df["has_valid_case_number"] = (
+        clean_df["case_number"]
+        .str.match(r"^\d{4}-\d{8}$")
+        .fillna(False)
+        .astype(int)
+    )
+
+    clean_df["has_valid_occurred_datetime"] = (
+        clean_df["occurred_datetime"]
+        .notna()
+        .astype(int)
+    )
+
+    clean_df["has_valid_reported_datetime"] = (
+        clean_df["reported_datetime"]
+        .notna()
+        .astype(int)
+    )
+
+    clean_df["has_valid_reporting_delay"] = (
+        clean_df["report_delay_hours"]
+        .notna()
+        .astype(int)
+    )
 
     final_columns = [
         "incident_id",
@@ -339,6 +831,8 @@ def build_clean_dataset(df):
         "hour",
         "is_weekend",
         "semester_period",
+        "source_year",
+        "source_month",
         "source_type",
         "source_url",
         "scraped_at",
@@ -352,85 +846,198 @@ def build_clean_dataset(df):
 
 
 def create_cleaning_summary(raw_df, clean_df):
-    """Create a simple markdown summary of the cleaning output."""
-    summary_lines = []
+    """Create a markdown summary of the cleaning output."""
+    summary_lines = [
+        "# Daily Incident Log Cleaning Summary 2023-2025",
+        "",
+        (
+            "Generated At: "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
+        "",
+        "## Input and Output",
+        "",
+        f"- Raw input file: `{RAW_INPUT_PATH}`",
+        f"- Clean output file: `{CLEAN_OUTPUT_PATH}`",
+        f"- Raw records: {len(raw_df):,}",
+        f"- Clean records: {len(clean_df):,}",
+        "",
+        "## Records by Source Year",
+        ""
+    ]
 
-    summary_lines.append("# Daily Incident Log Cleaning Summary")
-    summary_lines.append("")
-    summary_lines.append(f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    summary_lines.append("")
-    summary_lines.append("## Input and Output")
-    summary_lines.append("")
-    summary_lines.append(f"- Raw input file: `{RAW_INPUT_PATH}`")
-    summary_lines.append(f"- Clean output file: `{CLEAN_OUTPUT_PATH}`")
-    summary_lines.append(f"- Raw records: {len(raw_df):,}")
-    summary_lines.append(f"- Clean records: {len(clean_df):,}")
-    summary_lines.append("")
-    summary_lines.append("## Data Quality Checks")
-    summary_lines.append("")
-    summary_lines.append(f"- Valid case numbers: {clean_df['has_valid_case_number'].sum():,}")
-    summary_lines.append(f"- Valid occurred datetimes: {clean_df['has_valid_occurred_datetime'].sum():,}")
-    summary_lines.append(f"- Valid reported datetimes: {clean_df['has_valid_reported_datetime'].sum():,}")
-    summary_lines.append(f"- Valid reporting delays: {clean_df['has_valid_reporting_delay'].sum():,}")
-    summary_lines.append("")
-    summary_lines.append("## Top Crime Groups")
-    summary_lines.append("")
+    source_year_counts = (
+        clean_df["source_year"]
+        .value_counts()
+        .sort_index()
+    )
 
-    top_crime_groups = clean_df["crime_group"].value_counts().head(10)
+    for year, count in source_year_counts.items():
+        summary_lines.append(
+            f"- {int(year)}: {count:,}"
+        )
 
-    for group, count in top_crime_groups.items():
-        summary_lines.append(f"- {group}: {count:,}")
+    summary_lines.extend(
+        [
+            "",
+            "## Records by Occurred Year",
+            ""
+        ]
+    )
 
-    summary_lines.append("")
-    summary_lines.append("## Top Disposition Groups")
-    summary_lines.append("")
+    occurred_year_counts = (
+        clean_df["year"]
+        .value_counts()
+        .sort_index()
+    )
 
-    top_disposition_groups = clean_df["disposition_group"].value_counts().head(10)
+    for year, count in occurred_year_counts.items():
+        summary_lines.append(
+            f"- {int(year)}: {count:,}"
+        )
 
-    for group, count in top_disposition_groups.items():
-        summary_lines.append(f"- {group}: {count:,}")
+    summary_lines.extend(
+        [
+            "",
+            "## Data Quality Checks",
+            "",
+            (
+                "- Valid case numbers: "
+                f"{clean_df['has_valid_case_number'].sum():,}"
+            ),
+            (
+                "- Valid occurred datetimes: "
+                f"{clean_df['has_valid_occurred_datetime'].sum():,}"
+            ),
+            (
+                "- Valid reported datetimes: "
+                f"{clean_df['has_valid_reported_datetime'].sum():,}"
+            ),
+            (
+                "- Valid reporting delays: "
+                f"{clean_df['has_valid_reporting_delay'].sum():,}"
+            ),
+            "",
+            "## Crime Group Counts",
+            ""
+        ]
+    )
 
-    summary_lines.append("")
-    summary_lines.append("## Top Location Groups")
-    summary_lines.append("")
+    for group, count in (
+        clean_df["crime_group"]
+        .value_counts()
+        .items()
+    ):
+        summary_lines.append(
+            f"- {group}: {count:,}"
+        )
 
-    top_location_groups = clean_df["location_group"].value_counts().head(10)
+    summary_lines.extend(
+        [
+            "",
+            "## Disposition Group Counts",
+            ""
+        ]
+    )
 
-    for group, count in top_location_groups.items():
-        summary_lines.append(f"- {group}: {count:,}")
+    for group, count in (
+        clean_df["disposition_group"]
+        .value_counts()
+        .items()
+    ):
+        summary_lines.append(
+            f"- {group}: {count:,}"
+        )
+
+    summary_lines.extend(
+        [
+            "",
+            "## Location Group Counts",
+            ""
+        ]
+    )
+
+    for group, count in (
+        clean_df["location_group"]
+        .value_counts()
+        .items()
+    ):
+        summary_lines.append(
+            f"- {group}: {count:,}"
+        )
 
     return "\n".join(summary_lines)
 
 
 def main():
-    """Run the full cleaning process."""
+    """Run the full incident cleaning process."""
     if not RAW_INPUT_PATH.exists():
-        raise FileNotFoundError(f"Raw input file not found: {RAW_INPUT_PATH}")
+        raise FileNotFoundError(
+            f"Raw input file not found: {RAW_INPUT_PATH}"
+        )
 
-    print(f"Reading raw data from {RAW_INPUT_PATH}")
+    print(
+        f"Reading raw data from {RAW_INPUT_PATH}"
+    )
 
-    raw_df = pd.read_csv(RAW_INPUT_PATH)
+    raw_df = pd.read_csv(
+        RAW_INPUT_PATH
+    )
 
-    print(f"Raw records loaded: {len(raw_df):,}")
+    print(
+        f"Raw records loaded: {len(raw_df):,}"
+    )
 
-    clean_df = build_clean_dataset(raw_df)
+    clean_df = build_clean_dataset(
+        raw_df
+    )
 
-    CLEAN_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CLEAN_OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    clean_df.to_csv(CLEAN_OUTPUT_PATH, index=False)
+    SUMMARY_OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    summary_text = create_cleaning_summary(raw_df, clean_df)
-    SUMMARY_OUTPUT_PATH.write_text(summary_text)
+    clean_df.to_csv(
+        CLEAN_OUTPUT_PATH,
+        index=False
+    )
 
-    print(f"Clean records saved to {CLEAN_OUTPUT_PATH}")
-    print(f"Cleaning summary saved to {SUMMARY_OUTPUT_PATH}")
+    summary_text = create_cleaning_summary(
+        raw_df,
+        clean_df
+    )
+
+    SUMMARY_OUTPUT_PATH.write_text(
+        summary_text,
+        encoding="utf-8"
+    )
+
+    print(
+        f"Clean records saved to {CLEAN_OUTPUT_PATH}"
+    )
+
+    print(
+        f"Cleaning summary saved to {SUMMARY_OUTPUT_PATH}"
+    )
+
     print("")
-    print("Clean dataset preview:")
-    print(clean_df.head())
+    print("Incident records by source year:")
+
+    print(
+        clean_df["source_year"]
+        .value_counts()
+        .sort_index()
+    )
+
     print("")
-    print("Clean dataset shape:")
-    print(clean_df.shape)
+    print(
+        f"Clean dataset shape: {clean_df.shape}"
+    )
 
 
 if __name__ == "__main__":
