@@ -1,27 +1,26 @@
 """
 executive_overview.py
 
-Command Center section for the Terp Protect dashboard.
+Purpose:
+Display the executive-level Command Center for the Terp Protect
+dashboard.
 
 Responsibilities:
-- Calculate high-level incident statistics
-- Display one compact horizontal overview strip
-- Compare monthly incident trends across selected years
-- Display aligned overview charts and analytical insights
+- Summarize the current filtered incident view
+- Compare monthly incident activity across years
+- Display the leading crime groups
+- Present compact operational composition indicators
+- Avoid repeating detailed charts available in dedicated tabs
 """
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from components.charts import (
-    create_delay_bucket_chart,
-    create_horizontal_bar_chart,
-    create_status_bar_chart,
-    get_chart_config
-)
+from components.charts import get_chart_config
 from components.layout import (
     show_compact_overview_strip,
+    show_info_hint,
     show_insight,
     show_section_banner
 )
@@ -48,70 +47,174 @@ MONTH_ORDER = [
 ]
 
 
+MONTH_NUMBER_ORDER = list(
+    range(
+        1,
+        13
+    )
+)
+
+
+TOP_CRIME_GROUPS = 10
+
+PRIMARY_CHART_HEIGHT = 440
+COMPOSITION_CHART_HEIGHT = 330
+
+
 YEAR_COLORS = [
-    {
-        "line": "#7DD3FC",
-        "fill": "rgba(125, 211, 252, 0.18)"
-    },
-    {
-        "line": "#F9A8D4",
-        "fill": "rgba(249, 168, 212, 0.16)"
-    },
-    {
-        "line": "#FCD34D",
-        "fill": "rgba(252, 211, 77, 0.15)"
-    },
-    {
-        "line": "#86EFAC",
-        "fill": "rgba(134, 239, 172, 0.15)"
-    },
-    {
-        "line": "#C4B5FD",
-        "fill": "rgba(196, 181, 253, 0.16)"
-    }
+    "#8ED8F3",
+    "#E78A98",
+    "#F2CC68",
+    "#6AC7B6",
+    "#B6A6E9",
+    "#F2B880"
 ]
 
 
-PRIMARY_CHART_HEIGHT = 485
+OUTCOME_COLORS = {
+    "Closed / Cleared": "#6AC7B6",
+    "Pending / Active": "#F2CC68",
+    "Arrest-Related": "#E78A98",
+    "Other": "#AAB7C8"
+}
 
 
-def calculate_arrest_metrics(data):
+DELAY_COLORS = {
+    "Same Day / Within 24 Hours": "#6AC7B6",
+    "1-3 Days": "#F2CC68",
+    "4-7 Days": "#E9A85D",
+    "Over 7 Days": "#D95F65",
+    "Unknown": "#AAB7C8"
+}
+
+
+def calculate_percentage(
+    count,
+    total
+):
     """
-    Calculate arrest-related incident count and share.
+    Calculate a safe percentage.
     """
-    total_incidents = len(data)
+    if total <= 0:
+        return 0.0
 
-    if "is_arrest_related" not in data.columns:
-        return 0, 0.0
+    return (
+        count
+        / total
+        * 100
+    )
 
-    arrest_related_values = pd.to_numeric(
-        data["is_arrest_related"],
+
+def distinct_incident_count(data):
+    """
+    Return the number of distinct selected incidents.
+    """
+    if data is None or data.empty:
+        return 0
+
+    if "incident_id" in data.columns:
+        return int(
+            data["incident_id"]
+            .dropna()
+            .nunique()
+        )
+
+    return len(
+        data
+    )
+
+
+def clean_category_value(value):
+    """
+    Return a cleaned category value.
+    """
+    if pd.isna(value):
+        return "Unknown"
+
+    cleaned_value = str(
+        value
+    ).strip()
+
+    if not cleaned_value:
+        return "Unknown"
+
+    return cleaned_value
+
+
+def safe_binary_sum(
+    data,
+    column
+):
+    """
+    Safely sum a binary indicator column.
+    """
+    if (
+        data is None
+        or data.empty
+        or column not in data.columns
+    ):
+        return 0
+
+    values = pd.to_numeric(
+        data[column],
         errors="coerce"
     ).fillna(0)
 
-    arrest_related_count = int(
-        arrest_related_values.sum()
-    )
-
-    arrest_share = (
-        arrest_related_count
-        / total_incidents
-        * 100
-        if total_incidents > 0
-        else 0.0
-    )
-
-    return (
-        arrest_related_count,
-        arrest_share
+    return int(
+        values.sum()
     )
 
 
-def calculate_average_delay(data):
+def get_valid_delay_count(data):
     """
-    Calculate average reporting delay in hours.
+    Return the number of records with a valid non-negative delay.
     """
-    if "report_delay_hours" not in data.columns:
+    if (
+        data is None
+        or data.empty
+        or "report_delay_hours" not in data.columns
+    ):
+        return 0
+
+    delay_values = pd.to_numeric(
+        data["report_delay_hours"],
+        errors="coerce"
+    )
+
+    valid_mask = (
+        delay_values.notna()
+        & (
+            delay_values >= 0
+        )
+    )
+
+    if "has_valid_reporting_delay" in data.columns:
+        valid_flag = pd.to_numeric(
+            data["has_valid_reporting_delay"],
+            errors="coerce"
+        ).fillna(0)
+
+        valid_mask = (
+            valid_mask
+            & (
+                valid_flag == 1
+            )
+        )
+
+    return int(
+        valid_mask.sum()
+    )
+
+
+def calculate_median_delay_hours(data):
+    """
+    Calculate the median valid reporting delay.
+    """
+    if (
+        data is None
+        or data.empty
+        or "report_delay_hours" not in data.columns
+    ):
         return pd.NA
 
     delay_values = pd.to_numeric(
@@ -119,156 +222,286 @@ def calculate_average_delay(data):
         errors="coerce"
     )
 
-    return delay_values.mean()
+    delay_values = delay_values[
+        delay_values.notna()
+        & (
+            delay_values >= 0
+        )
+    ]
+
+    if delay_values.empty:
+        return pd.NA
+
+    return float(
+        delay_values.median()
+    )
 
 
-def format_average_delay(hours):
+def format_delay(hours):
     """
-    Format average reporting delay compactly.
+    Format a delay value as hours or days.
     """
-    if pd.isna(hours):
+    numeric_hours = pd.to_numeric(
+        hours,
+        errors="coerce"
+    )
+
+    if pd.isna(numeric_hours):
         return "N/A"
 
-    if hours < 48:
-        return f"{hours:.1f} hrs"
+    numeric_hours = float(
+        numeric_hours
+    )
 
-    return f"{hours / 24:.1f} days"
+    if numeric_hours < 48:
+        return f"{numeric_hours:.1f} hrs"
+
+    return f"{numeric_hours / 24:.1f} days"
 
 
-def get_chart_year_column(data):
+def calculate_weekend_percentage(data):
     """
-    Return the year column used for chart comparison.
+    Calculate weekend incident share.
     """
-    if "source_year" in data.columns:
-        return "source_year"
+    if data is None or data.empty:
+        return 0.0
 
-    if "occurred_year" in data.columns:
-        return "occurred_year"
+    if "occurred_is_weekend" in data.columns:
+        weekend_values = pd.to_numeric(
+            data["occurred_is_weekend"],
+            errors="coerce"
+        ).fillna(0)
+
+        return float(
+            weekend_values.mean()
+            * 100
+        )
+
+    if "occurred_weekday" in data.columns:
+        weekend_count = data[
+            "occurred_weekday"
+        ].isin(
+            [
+                "Saturday",
+                "Sunday"
+            ]
+        ).sum()
+
+        return calculate_percentage(
+            weekend_count,
+            len(data)
+        )
+
+    return 0.0
+
+
+def get_month_column(data):
+    """
+    Return the best available month-number column.
+    """
+    preferred_columns = [
+        "occurred_month",
+        "month",
+        "month_number"
+    ]
+
+    for column in preferred_columns:
+        if column in data.columns:
+            return column
 
     return None
 
 
-def prepare_monthly_year_comparison(data):
+def get_year_column(data):
     """
-    Aggregate incident counts by year and month.
+    Return the best available year column.
+    """
+    preferred_columns = [
+        "occurred_year",
+        "source_year",
+        "year"
+    ]
 
-    Missing month-year combinations are filled with zero.
+    for column in preferred_columns:
+        if column in data.columns:
+            return column
+
+    return None
+
+
+def prepare_monthly_year_data(data):
     """
-    year_column = get_chart_year_column(
+    Prepare monthly incident counts by year.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    year_column = get_year_column(
         data
     )
 
-    required_columns = {
-        "occurred_month",
-        "occurred_month_name"
-    }
+    month_column = get_month_column(
+        data
+    )
 
-    if (
-        year_column is None
-        or not required_columns.issubset(data.columns)
-    ):
+    if year_column is None:
         return pd.DataFrame()
 
-    chart_data = data[
-        [
-            year_column,
-            "occurred_month",
-            "occurred_month_name"
-        ]
-    ].copy()
+    working_data = data.copy()
 
-    chart_data[year_column] = pd.to_numeric(
-        chart_data[year_column],
+    working_data["_year"] = pd.to_numeric(
+        working_data[year_column],
         errors="coerce"
     )
 
-    chart_data["occurred_month"] = pd.to_numeric(
-        chart_data["occurred_month"],
-        errors="coerce"
-    )
+    if month_column is not None:
+        working_data["_month_number"] = pd.to_numeric(
+            working_data[month_column],
+            errors="coerce"
+        )
 
-    chart_data = chart_data.dropna(
+    elif "occurred_month_name" in working_data.columns:
+        month_mapping = {
+            month_name: month_number
+            for month_number, month_name in enumerate(
+                MONTH_ORDER,
+                start=1
+            )
+        }
+
+        working_data["_month_number"] = (
+            working_data["occurred_month_name"]
+            .map(
+                month_mapping
+            )
+        )
+
+    elif "occurred_datetime" in working_data.columns:
+        occurred_datetime = pd.to_datetime(
+            working_data["occurred_datetime"],
+            errors="coerce"
+        )
+
+        working_data["_month_number"] = (
+            occurred_datetime.dt.month
+        )
+
+    else:
+        return pd.DataFrame()
+
+    working_data = working_data.dropna(
         subset=[
-            year_column,
-            "occurred_month"
+            "_year",
+            "_month_number"
         ]
     )
 
-    if chart_data.empty:
+    working_data = working_data[
+        working_data["_month_number"].between(
+            1,
+            12
+        )
+    ]
+
+    if working_data.empty:
         return pd.DataFrame()
 
-    chart_data[year_column] = (
-        chart_data[year_column]
+    working_data["_year"] = (
+        working_data["_year"]
         .astype(int)
     )
 
-    chart_data["occurred_month"] = (
-        chart_data["occurred_month"]
+    working_data["_month_number"] = (
+        working_data["_month_number"]
         .astype(int)
     )
 
-    selected_years = sorted(
-        chart_data[year_column]
-        .drop_duplicates()
-        .tolist(),
-        reverse=True
-    )
+    if "incident_id" in working_data.columns:
+        monthly_summary = (
+            working_data
+            .groupby(
+                [
+                    "_year",
+                    "_month_number"
+                ]
+            )["incident_id"]
+            .nunique()
+            .reset_index(
+                name="incident_count"
+            )
+        )
+
+    else:
+        monthly_summary = (
+            working_data
+            .groupby(
+                [
+                    "_year",
+                    "_month_number"
+                ]
+            )
+            .size()
+            .reset_index(
+                name="incident_count"
+            )
+        )
 
     complete_index = pd.MultiIndex.from_product(
         [
-            selected_years,
-            range(1, 13)
+            sorted(
+                monthly_summary["_year"]
+                .unique()
+            ),
+            MONTH_NUMBER_ORDER
         ],
         names=[
-            year_column,
-            "occurred_month"
+            "_year",
+            "_month_number"
         ]
     )
 
-    monthly_counts = (
-        chart_data
-        .groupby(
+    monthly_summary = (
+        monthly_summary
+        .set_index(
             [
-                year_column,
-                "occurred_month"
+                "_year",
+                "_month_number"
             ]
         )
-        .size()
         .reindex(
             complete_index,
             fill_value=0
         )
-        .rename("incident_count")
         .reset_index()
     )
 
-    month_lookup = {
-        month_number: month_name
-        for month_number, month_name in enumerate(
-            MONTH_ORDER,
-            start=1
+    monthly_summary["month_name"] = (
+        monthly_summary["_month_number"]
+        .map(
+            {
+                month_number: month_name
+                for month_number, month_name in enumerate(
+                    MONTH_ORDER,
+                    start=1
+                )
+            }
         )
-    }
-
-    monthly_counts["month_name"] = (
-        monthly_counts["occurred_month"]
-        .map(month_lookup)
     )
 
-    return monthly_counts
+    return monthly_summary
 
 
-def create_yearly_monthly_wave_chart(data):
+def create_monthly_year_chart(data):
     """
-    Create a separate translucent monthly wave for each selected year.
+    Create a monthly incident trend with one line per year.
     """
-    monthly_counts = prepare_monthly_year_comparison(
+    monthly_data = prepare_monthly_year_data(
         data
     )
 
     figure = go.Figure()
 
-    if monthly_counts.empty:
+    if monthly_data.empty:
         figure.add_annotation(
             text="Monthly year-comparison data is unavailable.",
             x=0.5,
@@ -277,7 +510,7 @@ def create_yearly_monthly_wave_chart(data):
             yref="paper",
             showarrow=False,
             font={
-                "size": 15,
+                "size": 14,
                 "color": "#CBD5E1"
             }
         )
@@ -291,55 +524,48 @@ def create_yearly_monthly_wave_chart(data):
 
         return figure
 
-    year_column = get_chart_year_column(
-        data
-    )
-
-    selected_years = sorted(
-        monthly_counts[year_column]
-        .drop_duplicates()
-        .tolist(),
-        reverse=True
+    available_years = sorted(
+        monthly_data["_year"]
+        .unique()
     )
 
     for index, year in enumerate(
-        selected_years
+        available_years
     ):
-        year_data = monthly_counts[
-            monthly_counts[year_column] == year
+        year_data = monthly_data[
+            monthly_data["_year"]
+            == year
         ].sort_values(
-            "occurred_month"
+            "_month_number"
         )
-
-        color = YEAR_COLORS[
-            index % len(YEAR_COLORS)
-        ]
 
         figure.add_trace(
             go.Scatter(
-                x=year_data["month_name"],
-                y=year_data["incident_count"],
-                name=str(year),
+                x=year_data[
+                    "month_name"
+                ],
+                y=year_data[
+                    "incident_count"
+                ],
                 mode="lines+markers",
+                name=str(
+                    year
+                ),
                 line={
-                    "color": color["line"],
-                    "width": 3,
-                    "shape": "spline",
-                    "smoothing": 0.75
+                    "width": 2.6,
+                    "color": YEAR_COLORS[
+                        index
+                        % len(
+                            YEAR_COLORS
+                        )
+                    ]
                 },
                 marker={
-                    "size": 8,
-                    "color": color["line"],
-                    "line": {
-                        "color": "#0B111C",
-                        "width": 2
-                    }
+                    "size": 7
                 },
-                fill="tozeroy",
-                fillcolor=color["fill"],
                 hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
-                    "%{x}<br>"
+                    f"<b>{year}</b><br>"
+                    "Month: %{x}<br>"
                     "Incidents: %{y:,}"
                     "<extra></extra>"
                 )
@@ -352,255 +578,889 @@ def create_yearly_monthly_wave_chart(data):
             "x": 0,
             "xanchor": "left",
             "font": {
-                "size": 19,
+                "size": 17,
                 "color": "#F8FAFC"
             }
         },
         height=PRIMARY_CHART_HEIGHT,
         margin={
-            "l": 55,
+            "l": 62,
             "r": 25,
-            "t": 80,
-            "b": 70
+            "t": 78,
+            "b": 65
         },
         paper_bgcolor="#0B111C",
         plot_bgcolor="#0B111C",
-        hovermode="x unified",
+        font={
+            "color": "#F8FAFC"
+        },
         legend={
-            "title": {
-                "text": "Year",
-                "font": {
-                    "color": "#CBD5E1",
-                    "size": 12
-                }
-            },
             "orientation": "h",
             "yanchor": "bottom",
-            "y": 1.03,
+            "y": 1.02,
             "xanchor": "right",
             "x": 1,
             "font": {
-                "color": "#E2E8F0",
-                "size": 12
-            },
-            "bgcolor": "rgba(11, 17, 28, 0.65)",
-            "bordercolor": "rgba(148, 163, 184, 0.25)",
-            "borderwidth": 1
+                "size": 11,
+                "color": "#E2E8F0"
+            }
         },
         xaxis={
             "title": {
-                "text": "Month",
-                "font": {
-                    "color": "#F8FAFC",
-                    "size": 14
-                }
+                "text": "Month"
             },
             "categoryorder": "array",
             "categoryarray": MONTH_ORDER,
-            "tickangle": -32,
             "tickfont": {
-                "color": "#CBD5E1",
-                "size": 11
+                "size": 10,
+                "color": "#CBD5E1"
             },
+            "tickangle": -35,
             "showgrid": False,
             "showline": True,
-            "linecolor": "#334155",
-            "fixedrange": False
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
-                "text": "Incident Count",
-                "font": {
-                    "color": "#F8FAFC",
-                    "size": 14
-                }
+                "text": "Incident Count"
             },
             "rangemode": "tozero",
             "tickfont": {
-                "color": "#CBD5E1",
-                "size": 11
+                "size": 11,
+                "color": "#CBD5E1"
             },
-            "gridcolor": "rgba(71, 85, 105, 0.55)",
-            "zerolinecolor": "rgba(71, 85, 105, 0.8)",
+            "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "fixedrange": False
+            "linecolor": "#334155"
         },
+        hovermode="x unified"
+    )
+
+    return figure
+
+
+def prepare_crime_group_data(data):
+    """
+    Prepare top crime-group counts.
+    """
+    if (
+        data is None
+        or data.empty
+        or "crime_group" not in data.columns
+    ):
+        return pd.DataFrame()
+
+    working_data = data[
+        [
+            "crime_group"
+        ]
+    ].copy()
+
+    working_data["crime_group"] = (
+        working_data["crime_group"]
+        .apply(
+            clean_category_value
+        )
+    )
+
+    if "incident_id" in data.columns:
+        working_data["incident_id"] = data[
+            "incident_id"
+        ]
+
+        summary = (
+            working_data
+            .groupby(
+                "crime_group"
+            )["incident_id"]
+            .nunique()
+            .reset_index(
+                name="incident_count"
+            )
+        )
+
+    else:
+        summary = (
+            working_data
+            .groupby(
+                "crime_group"
+            )
+            .size()
+            .reset_index(
+                name="incident_count"
+            )
+        )
+
+    total_incidents = summary[
+        "incident_count"
+    ].sum()
+
+    summary["percentage"] = (
+        summary["incident_count"]
+        / total_incidents
+        * 100
+        if total_incidents > 0
+        else 0.0
+    )
+
+    return (
+        summary
+        .sort_values(
+            [
+                "incident_count",
+                "crime_group"
+            ],
+            ascending=[
+                False,
+                True
+            ]
+        )
+        .head(
+            TOP_CRIME_GROUPS
+        )
+    )
+
+
+def create_top_crime_group_chart(data):
+    """
+    Create a horizontal bar chart for leading crime groups.
+    """
+    crime_data = prepare_crime_group_data(
+        data
+    )
+
+    figure = go.Figure()
+
+    if crime_data.empty:
+        figure.add_annotation(
+            text="Crime-group data is unavailable.",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font={
+                "size": 14,
+                "color": "#CBD5E1"
+            }
+        )
+
+        figure.update_layout(
+            title="Top Crime Groups",
+            height=PRIMARY_CHART_HEIGHT,
+            paper_bgcolor="#0B111C",
+            plot_bgcolor="#0B111C"
+        )
+
+        return figure
+
+    chart_data = crime_data.sort_values(
+        "incident_count",
+        ascending=True
+    )
+
+    figure.add_trace(
+        go.Bar(
+            x=chart_data[
+                "incident_count"
+            ],
+            y=chart_data[
+                "crime_group"
+            ],
+            orientation="h",
+            marker={
+                "color": "#BEEBFA",
+                "line": {
+                    "color": "#8ED8F3",
+                    "width": 1
+                }
+            },
+            customdata=chart_data[
+                [
+                    "percentage"
+                ]
+            ],
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Incidents: %{x:,}<br>"
+                "Share: %{customdata[0]:.1f}%"
+                "<extra></extra>"
+            )
+        )
+    )
+
+    figure.update_layout(
+        title={
+            "text": "Top Crime Groups",
+            "x": 0,
+            "xanchor": "left",
+            "font": {
+                "size": 17,
+                "color": "#F8FAFC"
+            }
+        },
+        height=PRIMARY_CHART_HEIGHT,
+        margin={
+            "l": 170,
+            "r": 25,
+            "t": 78,
+            "b": 55
+        },
+        paper_bgcolor="#0B111C",
+        plot_bgcolor="#0B111C",
+        showlegend=False,
         font={
-            "family": "Arial, sans-serif",
             "color": "#F8FAFC"
+        },
+        xaxis={
+            "title": {
+                "text": "Incident Count"
+            },
+            "rangemode": "tozero",
+            "tickfont": {
+                "size": 11,
+                "color": "#CBD5E1"
+            },
+            "gridcolor": "rgba(71, 85, 105, 0.50)",
+            "showline": True,
+            "linecolor": "#334155"
+        },
+        yaxis={
+            "title": {
+                "text": ""
+            },
+            "tickfont": {
+                "size": 10,
+                "color": "#CBD5E1"
+            },
+            "showgrid": False,
+            "automargin": True
         }
     )
 
     return figure
 
 
-def standardize_chart_height(
+def normalize_outcome_label(value):
+    """
+    Convert a source outcome label into a compact operational category.
+    """
+    normalized_value = clean_category_value(
+        value
+    )
+
+    lower_value = normalized_value.lower()
+
+    if any(
+        keyword in lower_value
+        for keyword in [
+            "closed",
+            "cleared"
+        ]
+    ):
+        return "Closed / Cleared"
+
+    if any(
+        keyword in lower_value
+        for keyword in [
+            "pending",
+            "active"
+        ]
+    ):
+        return "Pending / Active"
+
+    if "arrest" in lower_value:
+        return "Arrest-Related"
+
+    return "Other"
+
+
+def prepare_outcome_composition(data):
+    """
+    Prepare major outcome composition.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    if "disposition_group" in data.columns:
+        outcome_values = (
+            data["disposition_group"]
+            .apply(
+                normalize_outcome_label
+            )
+        )
+
+    else:
+        outcome_values = pd.Series(
+            "Other",
+            index=data.index
+        )
+
+        closed_mask = pd.Series(
+            False,
+            index=data.index
+        )
+
+        pending_mask = pd.Series(
+            False,
+            index=data.index
+        )
+
+        arrest_mask = pd.Series(
+            False,
+            index=data.index
+        )
+
+        if "is_closed" in data.columns:
+            closed_mask = (
+                pd.to_numeric(
+                    data["is_closed"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+        if "is_pending" in data.columns:
+            pending_mask = (
+                pd.to_numeric(
+                    data["is_pending"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+        if "is_arrest_related" in data.columns:
+            arrest_mask = (
+                pd.to_numeric(
+                    data["is_arrest_related"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+        outcome_values.loc[
+            closed_mask
+        ] = "Closed / Cleared"
+
+        outcome_values.loc[
+            pending_mask
+        ] = "Pending / Active"
+
+        outcome_values.loc[
+            arrest_mask
+        ] = "Arrest-Related"
+
+    counts = (
+        outcome_values
+        .value_counts()
+        .reindex(
+            [
+                "Closed / Cleared",
+                "Pending / Active",
+                "Arrest-Related",
+                "Other"
+            ],
+            fill_value=0
+        )
+    )
+
+    total = int(
+        counts.sum()
+    )
+
+    summary = counts.rename(
+        "count"
+    ).reset_index()
+
+    summary.columns = [
+        "category",
+        "count"
+    ]
+
+    summary["percentage"] = (
+        summary["count"]
+        / total
+        * 100
+        if total > 0
+        else 0.0
+    )
+
+    return summary
+
+
+def prepare_delay_composition(data):
+    """
+    Prepare reporting-delay bucket composition.
+    """
+    delay_order = [
+        "Same Day / Within 24 Hours",
+        "1-3 Days",
+        "4-7 Days",
+        "Over 7 Days",
+        "Unknown"
+    ]
+
+    if (
+        data is None
+        or data.empty
+        or "delay_bucket" not in data.columns
+    ):
+        counts = pd.Series(
+            [0] * len(
+                delay_order
+            ),
+            index=delay_order
+        )
+
+    else:
+        delay_values = (
+            data["delay_bucket"]
+            .fillna("Unknown")
+            .astype(str)
+            .str.strip()
+            .replace(
+                {
+                    "": "Unknown"
+                }
+            )
+        )
+
+        counts = (
+            delay_values
+            .value_counts()
+            .reindex(
+                delay_order,
+                fill_value=0
+            )
+        )
+
+    total = int(
+        counts.sum()
+    )
+
+    summary = counts.rename(
+        "count"
+    ).reset_index()
+
+    summary.columns = [
+        "category",
+        "count"
+    ]
+
+    summary["percentage"] = (
+        summary["count"]
+        / total
+        * 100
+        if total > 0
+        else 0.0
+    )
+
+    return summary
+
+
+def prepare_weekpart_composition(data):
+    """
+    Prepare weekday-versus-weekend composition.
+    """
+    total = len(
+        data
+    )
+
+    weekend_percentage = calculate_weekend_percentage(
+        data
+    )
+
+    weekend_count = round(
+        total
+        * weekend_percentage
+        / 100
+    )
+
+    weekday_count = max(
+        total - weekend_count,
+        0
+    )
+
+    return pd.DataFrame(
+        {
+            "category": [
+                "Weekday",
+                "Weekend"
+            ],
+            "count": [
+                weekday_count,
+                weekend_count
+            ],
+            "percentage": [
+                calculate_percentage(
+                    weekday_count,
+                    total
+                ),
+                calculate_percentage(
+                    weekend_count,
+                    total
+                )
+            ]
+        }
+    )
+
+
+def add_composition_row(
     figure,
-    height=PRIMARY_CHART_HEIGHT
+    row_label,
+    composition_data,
+    color_mapping
 ):
     """
-    Force a Plotly chart to use the same height and outer margins
-    as the adjacent chart.
-
-    This keeps the insight bars aligned horizontally.
+    Add one 100% stacked horizontal composition row.
     """
+    for _, row in composition_data.iterrows():
+        figure.add_trace(
+            go.Bar(
+                y=[
+                    row_label
+                ],
+                x=[
+                    row[
+                        "percentage"
+                    ]
+                ],
+                name=row[
+                    "category"
+                ],
+                orientation="h",
+                marker={
+                    "color": color_mapping.get(
+                        row[
+                            "category"
+                        ],
+                        "#AAB7C8"
+                    )
+                },
+                customdata=[
+                    row[
+                        "count"
+                    ]
+                ],
+                hovertemplate=(
+                    f"<b>{row_label}</b><br>"
+                    f"{row['category']}<br>"
+                    "Share: %{x:.1f}%<br>"
+                    "Incidents: %{customdata:,}"
+                    "<extra></extra>"
+                ),
+                showlegend=False
+            )
+        )
+
+
+def create_operational_composition_chart(data):
+    """
+    Create a compact operational composition chart.
+
+    Rows:
+    - Case outcomes
+    - Reporting timeliness
+    - Weekday versus weekend activity
+    """
+    outcome_data = prepare_outcome_composition(
+        data
+    )
+
+    delay_data = prepare_delay_composition(
+        data
+    )
+
+    weekpart_data = prepare_weekpart_composition(
+        data
+    )
+
+    figure = go.Figure()
+
+    add_composition_row(
+        figure=figure,
+        row_label="Case Outcomes",
+        composition_data=outcome_data,
+        color_mapping=OUTCOME_COLORS
+    )
+
+    add_composition_row(
+        figure=figure,
+        row_label="Reporting Timeliness",
+        composition_data=delay_data,
+        color_mapping=DELAY_COLORS
+    )
+
+    add_composition_row(
+        figure=figure,
+        row_label="Incident Timing",
+        composition_data=weekpart_data,
+        color_mapping={
+            "Weekday": "#8ED8F3",
+            "Weekend": "#B6A6E9"
+        }
+    )
+
     figure.update_layout(
-        height=height,
+        title={
+            "text": "Operational Composition",
+            "x": 0,
+            "xanchor": "left",
+            "font": {
+                "size": 17,
+                "color": "#F8FAFC"
+            }
+        },
+        barmode="stack",
+        height=COMPOSITION_CHART_HEIGHT,
         margin={
-            "l": 55,
-            "r": 25,
-            "t": 80,
-            "b": 70
+            "l": 150,
+            "r": 30,
+            "t": 70,
+            "b": 55
+        },
+        paper_bgcolor="#0B111C",
+        plot_bgcolor="#0B111C",
+        font={
+            "color": "#F8FAFC"
+        },
+        xaxis={
+            "title": {
+                "text": "Share of Selected Incidents"
+            },
+            "range": [
+                0,
+                100
+            ],
+            "ticksuffix": "%",
+            "gridcolor": "rgba(71, 85, 105, 0.50)",
+            "showline": True,
+            "linecolor": "#334155",
+            "tickfont": {
+                "size": 11,
+                "color": "#CBD5E1"
+            }
+        },
+        yaxis={
+            "title": {
+                "text": ""
+            },
+            "categoryorder": "array",
+            "categoryarray": [
+                "Case Outcomes",
+                "Reporting Timeliness",
+                "Incident Timing"
+            ],
+            "autorange": "reversed",
+            "showgrid": False,
+            "tickfont": {
+                "size": 11,
+                "color": "#CBD5E1"
+            }
         }
     )
 
     return figure
 
 
-def get_yearly_peak_summary(data):
+def get_peak_month_year(data):
     """
-    Return the highest-volume month for each selected year.
+    Return the highest-volume month and year combination.
     """
-    monthly_counts = prepare_monthly_year_comparison(
+    monthly_data = prepare_monthly_year_data(
         data
     )
 
-    if monthly_counts.empty:
-        return (
-            "Monthly year-comparison data "
-            "is unavailable"
+    if monthly_data.empty:
+        return {
+            "year": "N/A",
+            "month": "N/A",
+            "count": 0
+        }
+
+    top_row = monthly_data.sort_values(
+        "incident_count",
+        ascending=False
+    ).iloc[0]
+
+    return {
+        "year": int(
+            top_row[
+                "_year"
+            ]
+        ),
+        "month": top_row[
+            "month_name"
+        ],
+        "count": int(
+            top_row[
+                "incident_count"
+            ]
         )
-
-    year_column = get_chart_year_column(
-        data
-    )
-
-    summaries = []
-
-    selected_years = sorted(
-        monthly_counts[year_column]
-        .drop_duplicates()
-        .tolist(),
-        reverse=True
-    )
-
-    for year in selected_years:
-        year_data = monthly_counts[
-            monthly_counts[year_column] == year
-        ]
-
-        peak_row = year_data.loc[
-            year_data["incident_count"].idxmax()
-        ]
-
-        summaries.append(
-            f"{year}: {peak_row['month_name']} "
-            f"({format_number(peak_row['incident_count'])})"
-        )
-
-    return "; ".join(
-        summaries
-    )
+    }
 
 
-def show_operational_summary(data):
+def get_same_day_percentage(data):
     """
-    Display the compact operational summary.
+    Return the percentage of incidents in the same-day delay bucket.
     """
-    total_incidents = len(data)
-
-    (
-        arrest_related_count,
-        arrest_share
-    ) = calculate_arrest_metrics(
+    delay_data = prepare_delay_composition(
         data
     )
 
-    average_delay = calculate_average_delay(
+    matching_rows = delay_data[
+        delay_data["category"]
+        == "Same Day / Within 24 Hours"
+    ]
+
+    if matching_rows.empty:
+        return 0.0
+
+    return float(
+        matching_rows.iloc[0][
+            "percentage"
+        ]
+    )
+
+
+def get_closed_percentage(data):
+    """
+    Return the closed or cleared incident share.
+    """
+    outcome_data = prepare_outcome_composition(
         data
     )
 
-    (
-        top_crime_group,
-        crime_count
-    ) = get_top_value(
+    matching_rows = outcome_data[
+        outcome_data["category"]
+        == "Closed / Cleared"
+    ]
+
+    if matching_rows.empty:
+        return 0.0
+
+    return float(
+        matching_rows.iloc[0][
+            "percentage"
+        ]
+    )
+
+
+def show_command_summary(data):
+    """
+    Display the compact executive KPI strip.
+    """
+    selected_incidents = distinct_incident_count(
+        data
+    )
+
+    top_crime_group, top_crime_count = get_top_value(
         data,
         "crime_group"
     )
 
-    (
-        top_outcome,
-        outcome_count
-    ) = get_top_value(
-        data,
-        "disposition_group"
-    )
-
-    (
-        top_location_group,
-        location_count
-    ) = get_top_value(
+    top_location_group, top_location_count = get_top_value(
         data,
         "location_group"
     )
 
+    top_outcome_group, top_outcome_count = get_top_value(
+        data,
+        "disposition_group"
+    )
+
+    median_delay = calculate_median_delay_hours(
+        data
+    )
+
+    valid_delay_count = get_valid_delay_count(
+        data
+    )
+
+    valid_delay_percentage = calculate_percentage(
+        valid_delay_count,
+        len(data)
+    )
+
+    same_day_percentage = get_same_day_percentage(
+        data
+    )
+
+    closed_percentage = get_closed_percentage(
+        data
+    )
+
+    weekend_percentage = calculate_weekend_percentage(
+        data
+    )
+
     overview_items = [
         {
-            "label": "Incidents",
+            "label": "Selected Incidents",
             "value": format_number(
-                total_incidents
+                selected_incidents
             ),
-            "meta": "Filtered records",
-            "numeric": True
-        },
-        {
-            "label": "Arrest-Related",
-            "value": format_number(
-                arrest_related_count
-            ),
-            "meta": "Arrest-linked incidents",
-            "numeric": True
-        },
-        {
-            "label": "Arrest Share",
-            "value": format_percentage(
-                arrest_share
-            ),
-            "meta": "Selected incident share",
-            "numeric": True
-        },
-        {
-            "label": "Average Delay",
-            "value": format_average_delay(
-                average_delay
-            ),
-            "meta": "Reporting time",
+            "meta": "Distinct filtered incidents",
             "numeric": True
         },
         {
             "label": "Top Crime Group",
             "value": top_crime_group,
-            "meta": "Leading category",
+            "meta": "Leading incident category",
             "badge": format_number(
-                crime_count
-            )
-        },
-        {
-            "label": "Top Outcome",
-            "value": top_outcome,
-            "meta": "Leading outcome",
-            "badge": format_number(
-                outcome_count
+                top_crime_count
             )
         },
         {
             "label": "Top Location Group",
             "value": top_location_group,
-            "meta": "Leading location",
+            "meta": "Leading location type",
             "badge": format_number(
-                location_count
+                top_location_count
             )
+        },
+        {
+            "label": "Top Outcome",
+            "value": top_outcome_group,
+            "meta": "Leading disposition group",
+            "badge": format_number(
+                top_outcome_count
+            )
+        },
+        {
+            "label": "Closed / Cleared",
+            "value": format_percentage(
+                closed_percentage
+            ),
+            "meta": "Selected incident share",
+            "numeric": True
+        },
+        {
+            "label": "Same-Day Reporting",
+            "value": format_percentage(
+                same_day_percentage
+            ),
+            "meta": "Within 24 hours",
+            "numeric": True
+        },
+        {
+            "label": "Median Delay",
+            "value": format_delay(
+                median_delay
+            ),
+            "meta": (
+                f"{format_percentage(valid_delay_percentage)} "
+                "valid coverage"
+            ),
+            "numeric": True
+        },
+        {
+            "label": "Weekend Share",
+            "value": format_percentage(
+                weekend_percentage
+            ),
+            "meta": "Saturday and Sunday",
+            "numeric": True
         }
     ]
 
@@ -608,55 +1468,65 @@ def show_operational_summary(data):
         overview_items
     )
 
+    peak_period = get_peak_month_year(
+        data
+    )
+
     show_insight(
-        f"{top_crime_group} is the most frequent crime group "
-        f"with {format_number(crime_count)} incidents. "
-        f"{top_outcome} is the leading outcome, while "
-        f"{top_location_group} is the leading location group."
+        f"{top_crime_group} is the leading crime group with "
+        f"{format_number(top_crime_count)} incidents. "
+        f"The highest monthly point is {peak_period['month']} "
+        f"{peak_period['year']} with "
+        f"{format_number(peak_period['count'])} incidents, while "
+        f"{format_percentage(same_day_percentage)} of selected records "
+        f"were reported within 24 hours."
+    )
+
+    show_info_hint(
+        "Command Center scope",
+        (
+            "This page provides an executive summary. Use the dedicated "
+            "tabs for detailed time, location, outcome, delay, arrest, "
+            "and data-quality analysis."
+        )
     )
 
     return {
+        "selected_incidents": selected_incidents,
         "top_crime_group": top_crime_group,
-        "crime_count": crime_count,
-        "top_outcome": top_outcome,
-        "outcome_count": outcome_count,
+        "top_crime_count": top_crime_count,
         "top_location_group": top_location_group,
-        "location_count": location_count
+        "top_location_count": top_location_count,
+        "top_outcome_group": top_outcome_group,
+        "top_outcome_count": top_outcome_count,
+        "median_delay": median_delay,
+        "same_day_percentage": same_day_percentage,
+        "closed_percentage": closed_percentage,
+        "weekend_percentage": weekend_percentage,
+        "peak_period": peak_period
     }
 
 
 def show_primary_charts(
     data,
-    summary_values
+    summary
 ):
     """
-    Display the primary Command Center charts.
-
-    Charts are rendered in one row and their insight bars are rendered
-    in a separate matching row. This guarantees horizontal alignment.
+    Display the two primary Command Center charts.
     """
-    monthly_chart = create_yearly_monthly_wave_chart(
+    monthly_chart = create_monthly_year_chart(
         data
     )
 
-    crime_chart = create_horizontal_bar_chart(
-        data=data,
-        group_column="crime_group",
-        title="Incident Volume by Crime Group",
-        count_label="Incident Count",
-        chart_type="incident_soft"
-    )
-
-    monthly_chart = standardize_chart_height(
-        monthly_chart
-    )
-
-    crime_chart = standardize_chart_height(
-        crime_chart
+    crime_chart = create_top_crime_group_chart(
+        data
     )
 
     chart_left, chart_right = st.columns(
-        2,
+        [
+            1.15,
+            0.85
+        ],
         gap="small"
     )
 
@@ -664,7 +1534,7 @@ def show_primary_charts(
         st.plotly_chart(
             monthly_chart,
             use_container_width=True,
-            key="command_yearly_monthly_wave_chart",
+            key="command_monthly_year_chart",
             config=get_chart_config()
         )
 
@@ -672,136 +1542,79 @@ def show_primary_charts(
         st.plotly_chart(
             crime_chart,
             use_container_width=True,
-            key="command_crime_group_chart",
+            key="command_top_crime_groups_chart",
             config=get_chart_config()
         )
 
     insight_left, insight_right = st.columns(
-        2,
+        [
+            1.15,
+            0.85
+        ],
         gap="small"
     )
 
     with insight_left:
+        peak_period = summary[
+            "peak_period"
+        ]
+
         show_insight(
-            "Peak month by selected year — "
-            f"{get_yearly_peak_summary(data)}."
+            f"{peak_period['month']} {peak_period['year']} is the "
+            f"highest-volume month-year combination with "
+            f"{format_number(peak_period['count'])} incidents."
         )
 
     with insight_right:
         show_insight(
-            f"{summary_values['top_crime_group']} contributes "
-            "the largest share of selected incident volume."
-        )
-
-    outcome_chart = create_status_bar_chart(
-        data=data,
-        group_column="disposition_group",
-        title="Case Outcomes by Volume",
-        count_label="Incident Count"
-    )
-
-    location_chart = create_horizontal_bar_chart(
-        data=data,
-        group_column="location_group",
-        title="Incident Volume by Location Group",
-        count_label="Incident Count",
-        chart_type="incident_soft"
-    )
-
-    outcome_chart = standardize_chart_height(
-        outcome_chart
-    )
-
-    location_chart = standardize_chart_height(
-        location_chart
-    )
-
-    chart_left, chart_right = st.columns(
-        2,
-        gap="small"
-    )
-
-    with chart_left:
-        st.plotly_chart(
-            outcome_chart,
-            use_container_width=True,
-            key="command_outcome_group_chart",
-            config=get_chart_config()
-        )
-
-    with chart_right:
-        st.plotly_chart(
-            location_chart,
-            use_container_width=True,
-            key="command_location_group_chart",
-            config=get_chart_config()
-        )
-
-    insight_left, insight_right = st.columns(
-        2,
-        gap="small"
-    )
-
-    with insight_left:
-        show_insight(
-            f"{summary_values['top_outcome']} is the leading "
-            "outcome category, appearing in "
-            f"{format_number(summary_values['outcome_count'])} "
-            "selected records."
-        )
-
-    with insight_right:
-        show_insight(
-            f"{summary_values['top_location_group']} is the "
-            "highest-volume location group with "
-            f"{format_number(summary_values['location_count'])} "
-            "incidents."
+            f"{summary['top_crime_group']} is the leading crime group "
+            f"with {format_number(summary['top_crime_count'])} incidents."
         )
 
 
-def show_delay_chart(data):
+def show_operational_composition(
+    data,
+    summary
+):
     """
-    Display the reporting-delay distribution chart.
+    Display the compact operational composition strip.
     """
+    composition_chart = create_operational_composition_chart(
+        data
+    )
+
     st.plotly_chart(
-        create_delay_bucket_chart(
-            data
-        ),
+        composition_chart,
         use_container_width=True,
-        key="command_delay_bucket_chart",
+        key="command_operational_composition_chart",
         config=get_chart_config()
     )
 
-    (
-        top_delay_bucket,
-        delay_bucket_count
-    ) = get_top_value(
-        data,
-        "delay_bucket"
-    )
-
     show_insight(
-        f"The most common reporting delay bucket is "
-        f"{top_delay_bucket}, with "
-        f"{format_number(delay_bucket_count)} records."
+        f"{format_percentage(summary['closed_percentage'])} of selected "
+        f"incidents are closed or cleared, "
+        f"{format_percentage(summary['same_day_percentage'])} were "
+        f"reported within 24 hours, and "
+        f"{format_percentage(summary['weekend_percentage'])} occurred "
+        f"on weekends."
     )
 
 
 def show_executive_overview(data):
     """
-    Display the complete Command Center section.
+    Display the complete Command Center.
     """
     show_section_banner(
-        eyebrow="",
-        title="Operational Snapshot",
+        eyebrow="Executive Intelligence",
+        title="Terp Protect Command Center",
         description=(
-            "Monitor incident volume, arrest involvement, case outcomes, "
-            "reporting delay, and leading categories for the current "
-            "filtered selection."
+            "Monitor incident volume, seasonal trends, leading crime "
+            "categories, and core operational composition for the "
+            "current filtered view."
         )
     )
 
-    summary_values = show_operational_summary(
+    summary = show_command_summary(
         data
     )
 
@@ -809,9 +1622,10 @@ def show_executive_overview(data):
 
     show_primary_charts(
         data,
-        summary_values
+        summary
     )
 
-    show_delay_chart(
-        data
+    show_operational_composition(
+        data,
+        summary
     )

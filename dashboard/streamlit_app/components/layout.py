@@ -10,6 +10,7 @@ Responsibilities:
 - Display reusable notes and insight messages
 - Display sidebar filter summaries and help
 - Display compact overview cards
+- Display metric-definition tooltips
 - Display contextual Data Review Panel help
 """
 
@@ -18,6 +19,7 @@ import re
 
 import streamlit as st
 
+from components.metrics import get_metric_help
 from components.theme import get_theme
 
 
@@ -1070,7 +1072,16 @@ div[data-testid="stMetricValue"] {{
     color: #111827 !important;
 }}
 
+.overview-strip-label-row {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.35rem;
+}}
+
 .overview-strip-label {{
+    min-width: 0;
+
     color: #475569 !important;
 
     font-size: 0.67rem;
@@ -1078,6 +1089,35 @@ div[data-testid="stMetricValue"] {{
     line-height: 1.12;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+}}
+
+.overview-strip-metric-help {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    width: 1rem;
+    height: 1rem;
+
+    color: #475569 !important;
+    background: rgba(255, 255, 255, 0.58);
+
+    border: 1px solid rgba(100, 116, 139, 0.38);
+    border-radius: 999px;
+
+    font-size: 0.61rem;
+    font-weight: 850;
+    line-height: 1;
+
+    cursor: help;
+}}
+
+.overview-strip-metric-help:hover {{
+    color: #0F172A !important;
+    background: #FFFFFF;
+
+    border-color: rgba(71, 85, 105, 0.65);
 }}
 
 .overview-strip-value {{
@@ -1621,34 +1661,106 @@ def show_section_banner(
 def show_compact_overview_strip(items):
     """
     Display compact overview cards in one horizontal row.
+
+    Supported item properties:
+    - label: visible metric label
+    - value: visible metric value
+    - meta: optional supporting text
+    - badge: optional count or status badge
+    - numeric: whether the value should use numeric styling
+    - metric_key: optional key from METRIC_DEFINITIONS
+    - help: optional custom tooltip text
+
+    When both metric_key and help are provided, the custom help text
+    takes precedence.
     """
     cards = []
 
     for item in items:
         label = html.escape(
-            str(item.get("label", ""))
+            str(
+                item.get(
+                    "label",
+                    ""
+                )
+            )
         )
 
         value = html.escape(
-            str(item.get("value", ""))
+            str(
+                item.get(
+                    "value",
+                    ""
+                )
+            )
         )
 
         meta = html.escape(
-            str(item.get("meta", ""))
+            str(
+                item.get(
+                    "meta",
+                    ""
+                )
+            )
         )
 
         badge = html.escape(
-            str(item.get("badge", ""))
+            str(
+                item.get(
+                    "badge",
+                    ""
+                )
+            )
+        )
+
+        metric_key = item.get(
+            "metric_key"
+        )
+
+        custom_help = item.get(
+            "help"
         )
 
         is_numeric = bool(
-            item.get("numeric", False)
+            item.get(
+                "numeric",
+                False
+            )
         )
 
         value_class = "overview-strip-value"
 
         if is_numeric:
             value_class += " numeric"
+
+        help_text = ""
+
+        if custom_help:
+            help_text = str(
+                custom_help
+            )
+
+        elif metric_key:
+            help_text = get_metric_help(
+                metric_key
+            )
+
+        safe_help_text = html.escape(
+            help_text,
+            quote=True
+        )
+
+        help_html = ""
+
+        if safe_help_text:
+            help_html = (
+                '<span '
+                'class="overview-strip-metric-help" '
+                f'title="{safe_help_text}" '
+                'aria-label="Metric definition">'
+                '?'
+                '</span>'
+            )
 
         badge_html = ""
 
@@ -1671,8 +1783,15 @@ def show_compact_overview_strip(items):
         card_html = (
             '<div class="overview-strip-card">'
             '<div>'
-            f'<div class="overview-strip-label">{label}</div>'
-            f'<div class="{value_class}">{value}</div>'
+            '<div class="overview-strip-label-row">'
+            '<div class="overview-strip-label">'
+            f'{label}'
+            '</div>'
+            f'{help_html}'
+            '</div>'
+            f'<div class="{value_class}">'
+            f'{value}'
+            '</div>'
             '</div>'
             '<div class="overview-strip-footer">'
             f'{meta_html}'
@@ -1696,6 +1815,22 @@ def show_compact_overview_strip(items):
     st.markdown(
         strip_html,
         unsafe_allow_html=True
+    )
+
+
+def show_metric_definition(
+    metric_key,
+    label="Metric definition"
+):
+    """
+    Display a compact metric-definition hint using the centralized
+    definition stored in components.metrics.
+    """
+    show_info_hint(
+        label=label,
+        help_text=get_metric_help(
+            metric_key
+        )
     )
 
 
@@ -1802,10 +1937,6 @@ def show_insight(text):
     """
     Display a reusable analytical insight box.
     """
-    # highlighted_text = highlight_keywords(
-    #     text
-    # )
-
     insight_html = (
         '<div class="insight-box">'
         '<strong>Insight:</strong> '
