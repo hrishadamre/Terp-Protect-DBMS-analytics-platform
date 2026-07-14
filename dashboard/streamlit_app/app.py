@@ -1045,7 +1045,7 @@ def show_compact_data_review(
     """
     Display compact record samples for dashboard validation.
     """
-    st.divider()
+    # st.divider()
 
     show_data_review_heading(
         (
@@ -1313,12 +1313,12 @@ def main():
         incident_data
     )
 
-    show_main_active_filter_summary(
-        active_filters=active_filters,
-        filtered_record_count=len(
-            filtered_incident_data
-        )
-    )
+    # show_main_active_filter_summary(
+    #     active_filters=active_filters,
+    #     filtered_record_count=len(
+    #         filtered_incident_data
+    #     )
+    # )
 
     if filtered_incident_data.empty:
         st.warning(

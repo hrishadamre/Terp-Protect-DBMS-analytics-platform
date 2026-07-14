@@ -2,15 +2,15 @@
 reporting_delay.py
 
 Purpose:
-Display the reporting timeliness profile for the Terp Protect dashboard.
+Analyze how long incidents take to be reported after occurrence.
 
 Responsibilities:
-- Measure valid reporting delays
-- Prioritize median and 90th-percentile delay over the mean
-- Display reporting-delay buckets in a meaningful order
+- Validate reporting-delay values
+- Summarize median and P90 reporting delay
+- Show ordered elapsed-time delay buckets
 - Compare median delay across crime and location groups
-- Exclude very small groups from grouped delay comparisons
-- Provide a collapsed high-delay review table
+- Use consistent valid-record denominators
+- Keep high-delay record review collapsed
 """
 
 import pandas as pd
@@ -32,7 +32,7 @@ from components.metrics import (
 
 
 DELAY_BUCKET_ORDER = [
-    "Same Day / Within 24 Hours",
+    "Reported Within 24 Hours",
     "1-3 Days",
     "4-7 Days",
     "Over 7 Days",
@@ -41,7 +41,7 @@ DELAY_BUCKET_ORDER = [
 
 
 DELAY_BUCKET_COLORS = {
-    "Same Day / Within 24 Hours": "#6AC7B6",
+    "Reported Within 24 Hours": "#6AC7B6",
     "1-3 Days": "#F2CC68",
     "4-7 Days": "#E9A85D",
     "Over 7 Days": "#D95F65",
@@ -49,24 +49,144 @@ DELAY_BUCKET_COLORS = {
 }
 
 
-GROUP_CHART_HEIGHT = 440
-
-DELAY_BUCKET_CHART_HEIGHT = 440
-
 MINIMUM_GROUP_RECORDS = 20
+TOP_GROUPS = 12
+
+BUCKET_CHART_HEIGHT = 430
+GROUP_CHART_HEIGHT = 470
+
+
+def safe_percentage(
+    numerator,
+    denominator
+):
+    """
+    Calculate a percentage safely.
+    """
+    numeric_numerator = pd.to_numeric(
+        numerator,
+        errors="coerce"
+    )
+
+    numeric_denominator = pd.to_numeric(
+        denominator,
+        errors="coerce"
+    )
+
+    if (
+        pd.isna(numeric_numerator)
+        or pd.isna(numeric_denominator)
+        or numeric_denominator <= 0
+    ):
+        return 0.0
+
+    return float(
+        numeric_numerator
+        / numeric_denominator
+        * 100
+    )
+
+
+def distinct_incident_count(data):
+    """
+    Return the number of distinct incidents.
+    """
+    if data is None or data.empty:
+        return 0
+
+    if "incident_id" in data.columns:
+        return int(
+            data["incident_id"]
+            .dropna()
+            .nunique()
+        )
+
+    return len(
+        data
+    )
+
+
+def format_delay_duration(value):
+    """
+    Format a reporting delay consistently.
+
+    Delays below 48 hours are displayed in hours.
+    Delays of 48 hours or more are displayed in days.
+    """
+    numeric_value = pd.to_numeric(
+        value,
+        errors="coerce"
+    )
+
+    if pd.isna(
+        numeric_value
+    ):
+        return "N/A"
+
+    numeric_value = float(
+        numeric_value
+    )
+
+    if numeric_value < 48:
+        return f"{numeric_value:.1f} hrs"
+
+    return f"{numeric_value / 24:.1f} days"
+
+
+def normalize_delay_bucket(value):
+    """
+    Standardize delay bucket labels.
+
+    The first bucket is based on elapsed time, not calendar date.
+    """
+    if pd.isna(value):
+        return "Unknown"
+
+    cleaned_value = str(
+        value
+    ).strip()
+
+    lower_value = cleaned_value.lower()
+
+    if (
+        "same day" in lower_value
+        or "within 24" in lower_value
+    ):
+        return "Reported Within 24 Hours"
+
+    if (
+        "1-3" in lower_value
+        or "1 - 3" in lower_value
+    ):
+        return "1-3 Days"
+
+    if (
+        "4-7" in lower_value
+        or "4 - 7" in lower_value
+    ):
+        return "4-7 Days"
+
+    if (
+        "over 7" in lower_value
+        or "more than 7" in lower_value
+    ):
+        return "Over 7 Days"
+
+    return "Unknown"
 
 
 def get_valid_delay_data(data):
     """
-    Return records containing a valid non-negative reporting delay.
+    Return records containing valid, non-negative reporting delays.
     """
-    if data is None or data.empty:
+    if (
+        data is None
+        or data.empty
+        or "report_delay_hours" not in data.columns
+    ):
         return pd.DataFrame()
 
     valid_data = data.copy()
-
-    if "report_delay_hours" not in valid_data.columns:
-        return valid_data.iloc[0:0].copy()
 
     valid_data["report_delay_hours"] = pd.to_numeric(
         valid_data["report_delay_hours"],
@@ -76,8 +196,7 @@ def get_valid_delay_data(data):
     valid_mask = (
         valid_data["report_delay_hours"].notna()
         & (
-            valid_data["report_delay_hours"]
-            >= 0
+            valid_data["report_delay_hours"] >= 0
         )
     )
 
@@ -94,143 +213,208 @@ def get_valid_delay_data(data):
             )
         )
 
-    return valid_data[
+    valid_data = valid_data[
         valid_mask
     ].copy()
 
-
-def calculate_percentage(
-    count,
-    total
-):
-    """
-    Calculate a safe percentage.
-    """
-    if total <= 0:
-        return 0.0
-
-    return (
-        count
-        / total
-        * 100
-    )
-
-
-def format_delay(hours):
-    """
-    Format reporting delay using hours or days.
-
-    Values below 48 hours are shown in hours.
-    Larger values are shown in days.
-    """
-    numeric_hours = pd.to_numeric(
-        hours,
-        errors="coerce"
-    )
-
-    if pd.isna(numeric_hours):
-        return "N/A"
-
-    numeric_hours = float(
-        numeric_hours
-    )
-
-    if numeric_hours < 48:
-        return f"{numeric_hours:.1f} hrs"
-
-    return f"{numeric_hours / 24:.1f} days"
-
-
-def calculate_delay_statistics(valid_delay_data):
-    """
-    Calculate median, P90, and supporting delay metrics.
-    """
     if (
-        valid_delay_data.empty
-        or "report_delay_hours" not in valid_delay_data.columns
+        not valid_data.empty
+        and "incident_id" in valid_data.columns
     ):
+        valid_data = valid_data.drop_duplicates(
+            subset=[
+                "incident_id"
+            ]
+        )
+
+    return valid_data
+
+
+def calculate_delay_statistics(data):
+    """
+    Calculate reporting-delay statistics from valid incident records.
+    """
+    total_records = distinct_incident_count(
+        data
+    )
+
+    valid_data = get_valid_delay_data(
+        data
+    )
+
+    valid_count = distinct_incident_count(
+        valid_data
+    )
+
+    invalid_count = max(
+        total_records - valid_count,
+        0
+    )
+
+    valid_coverage = safe_percentage(
+        valid_count,
+        total_records
+    )
+
+    if valid_data.empty:
         return {
-            "median_hours": pd.NA,
-            "p90_hours": pd.NA,
-            "mean_hours": pd.NA
+            "total_records": total_records,
+            "valid_count": valid_count,
+            "invalid_count": invalid_count,
+            "valid_coverage": valid_coverage,
+            "median_delay": pd.NA,
+            "p90_delay": pd.NA,
+            "within_24_count": 0,
+            "within_24_share": 0.0,
+            "over_seven_day_count": 0,
+            "over_seven_day_share": 0.0
         }
 
-    delay_values = pd.to_numeric(
-        valid_delay_data["report_delay_hours"],
-        errors="coerce"
-    ).dropna()
+    delay_values = valid_data[
+        "report_delay_hours"
+    ]
 
-    if delay_values.empty:
-        return {
-            "median_hours": pd.NA,
-            "p90_hours": pd.NA,
-            "mean_hours": pd.NA
-        }
+    median_delay = float(
+        delay_values.median()
+    )
 
-    return {
-        "median_hours": delay_values.median(),
-        "p90_hours": delay_values.quantile(0.90),
-        "mean_hours": delay_values.mean()
-    }
+    p90_delay = float(
+        delay_values.quantile(
+            0.90
+        )
+    )
 
-
-def count_delay_bucket(
-    data,
-    bucket_name
-):
-    """
-    Count records in one delay bucket.
-    """
-    if (
-        data is None
-        or data.empty
-        or "delay_bucket" not in data.columns
-    ):
-        return 0
-
-    return int(
+    within_24_count = int(
         (
-            data["delay_bucket"]
-            == bucket_name
+            delay_values <= 24
         ).sum()
     )
+
+    over_seven_day_count = int(
+        (
+            delay_values > 168
+        ).sum()
+    )
+
+    within_24_share = safe_percentage(
+        within_24_count,
+        valid_count
+    )
+
+    over_seven_day_share = safe_percentage(
+        over_seven_day_count,
+        valid_count
+    )
+
+    return {
+        "total_records": total_records,
+        "valid_count": valid_count,
+        "invalid_count": invalid_count,
+        "valid_coverage": valid_coverage,
+        "median_delay": median_delay,
+        "p90_delay": p90_delay,
+        "within_24_count": within_24_count,
+        "within_24_share": within_24_share,
+        "over_seven_day_count": over_seven_day_count,
+        "over_seven_day_share": over_seven_day_share
+    }
 
 
 def prepare_delay_bucket_data(data):
     """
-    Prepare delay-bucket counts in the required chronological order.
+    Prepare ordered reporting-delay bucket counts.
+
+    The first bucket means elapsed reporting time of 24 hours or less.
     """
-    if (
-        data is None
-        or data.empty
-        or "delay_bucket" not in data.columns
-    ):
+    if data is None or data.empty:
         return pd.DataFrame(
             {
                 "delay_bucket": DELAY_BUCKET_ORDER,
-                "incident_count": [0] * len(
+                "incident_count": [
+                    0
+                ] * len(
                     DELAY_BUCKET_ORDER
                 ),
-                "percentage": [0.0] * len(
+                "percentage": [
+                    0.0
+                ] * len(
                     DELAY_BUCKET_ORDER
                 )
             }
         )
 
-    cleaned_buckets = (
-        data["delay_bucket"]
-        .fillna("Unknown")
-        .astype(str)
-        .str.strip()
-        .replace(
-            {
-                "": "Unknown"
-            }
+    working_data = data.copy()
+
+    if (
+        "incident_id" in working_data.columns
+    ):
+        working_data = working_data.drop_duplicates(
+            subset=[
+                "incident_id"
+            ]
         )
-    )
+
+    if "delay_bucket" in working_data.columns:
+        bucket_values = (
+            working_data["delay_bucket"]
+            .apply(
+                normalize_delay_bucket
+            )
+        )
+
+    elif "report_delay_hours" in working_data.columns:
+        delay_values = pd.to_numeric(
+            working_data["report_delay_hours"],
+            errors="coerce"
+        )
+
+        bucket_values = pd.Series(
+            "Unknown",
+            index=working_data.index,
+            dtype="object"
+        )
+
+        bucket_values.loc[
+            delay_values.notna()
+            & (
+                delay_values >= 0
+            )
+            & (
+                delay_values <= 24
+            )
+        ] = "Reported Within 24 Hours"
+
+        bucket_values.loc[
+            (
+                delay_values > 24
+            )
+            & (
+                delay_values <= 72
+            )
+        ] = "1-3 Days"
+
+        bucket_values.loc[
+            (
+                delay_values > 72
+            )
+            & (
+                delay_values <= 168
+            )
+        ] = "4-7 Days"
+
+        bucket_values.loc[
+            delay_values > 168
+        ] = "Over 7 Days"
+
+    else:
+        bucket_values = pd.Series(
+            "Unknown",
+            index=working_data.index,
+            dtype="object"
+        )
 
     bucket_counts = (
-        cleaned_buckets
+        bucket_values
         .value_counts()
         .reindex(
             DELAY_BUCKET_ORDER,
@@ -251,37 +435,25 @@ def prepare_delay_bucket_data(data):
         "incident_count"
     ]
 
-    bucket_data["percentage"] = (
-        bucket_data["incident_count"]
-        / total_records
-        * 100
-        if total_records > 0
-        else 0.0
+    bucket_data["percentage"] = bucket_data[
+        "incident_count"
+    ].apply(
+        lambda count: safe_percentage(
+            count,
+            total_records
+        )
     )
 
     return bucket_data
 
 
-def create_ordered_delay_bucket_chart(data):
+def create_delay_bucket_chart(data):
     """
-    Create an ordered reporting-delay bucket bar chart.
-
-    The previous line overlay has been removed because delay buckets
-    are discrete categories rather than a continuous time series.
+    Create the ordered elapsed reporting-delay distribution.
     """
     bucket_data = prepare_delay_bucket_data(
         data
     )
-
-    colors = [
-        DELAY_BUCKET_COLORS.get(
-            bucket,
-            "#AAB7C8"
-        )
-        for bucket in bucket_data[
-            "delay_bucket"
-        ]
-    ]
 
     figure = go.Figure()
 
@@ -294,11 +466,15 @@ def create_ordered_delay_bucket_chart(data):
                 "incident_count"
             ],
             marker={
-                "color": colors,
-                "line": {
-                    "color": "rgba(255, 255, 255, 0.10)",
-                    "width": 1
-                }
+                "color": [
+                    DELAY_BUCKET_COLORS.get(
+                        bucket,
+                        "#AAB7C8"
+                    )
+                    for bucket in bucket_data[
+                        "delay_bucket"
+                    ]
+                ]
             },
             customdata=bucket_data[
                 [
@@ -307,8 +483,8 @@ def create_ordered_delay_bucket_chart(data):
             ],
             hovertemplate=(
                 "<b>%{x}</b><br>"
-                "Incidents: %{y:,}<br>"
-                "Share: %{customdata[0]:.1f}%"
+                "Distinct incidents: %{y:,}<br>"
+                "Share of selected incidents: %{customdata[0]:.1f}%"
                 "<extra></extra>"
             )
         )
@@ -316,7 +492,7 @@ def create_ordered_delay_bucket_chart(data):
 
     figure.update_layout(
         title={
-            "text": "Reporting Delay Distribution",
+            "text": "Elapsed Reporting Delay Distribution",
             "x": 0,
             "xanchor": "left",
             "font": {
@@ -324,12 +500,12 @@ def create_ordered_delay_bucket_chart(data):
                 "color": "#F8FAFC"
             }
         },
-        height=DELAY_BUCKET_CHART_HEIGHT,
+        height=BUCKET_CHART_HEIGHT,
         margin={
             "l": 60,
-            "r": 24,
-            "t": 68,
-            "b": 75
+            "r": 25,
+            "t": 70,
+            "b": 95
         },
         paper_bgcolor="#0B111C",
         plot_bgcolor="#0B111C",
@@ -339,12 +515,13 @@ def create_ordered_delay_bucket_chart(data):
         },
         xaxis={
             "title": {
-                "text": "Reporting Delay"
+                "text": "Elapsed Time from Occurrence to Report"
             },
             "categoryorder": "array",
             "categoryarray": DELAY_BUCKET_ORDER,
+            "tickangle": -25,
             "tickfont": {
-                "size": 11,
+                "size": 10,
                 "color": "#CBD5E1"
             },
             "showgrid": False,
@@ -353,14 +530,14 @@ def create_ordered_delay_bucket_chart(data):
         },
         yaxis={
             "title": {
-                "text": "Incident Count"
+                "text": "Distinct Incident Count"
             },
             "rangemode": "tozero",
+            "gridcolor": "rgba(71, 85, 105, 0.50)",
             "tickfont": {
                 "size": 11,
                 "color": "#CBD5E1"
             },
-            "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
             "linecolor": "#334155"
         }
@@ -369,40 +546,43 @@ def create_ordered_delay_bucket_chart(data):
     return figure
 
 
-def prepare_group_delay_summary(
-    valid_delay_data,
+def prepare_group_delay_data(
+    data,
     group_column,
+    maximum_groups=TOP_GROUPS,
     minimum_records=MINIMUM_GROUP_RECORDS
 ):
     """
-    Calculate grouped median, P90, mean, and valid-record count.
+    Prepare median and P90 delay by category.
 
-    Groups with fewer than minimum_records valid records are excluded
-    to reduce misleading results caused by very small samples.
+    Groups below the minimum valid-record threshold are excluded.
     """
-    required_columns = {
-        group_column,
-        "report_delay_hours"
-    }
+    valid_data = get_valid_delay_data(
+        data
+    )
 
     if (
-        valid_delay_data is None
-        or valid_delay_data.empty
-        or not required_columns.issubset(
-            valid_delay_data.columns
-        )
+        valid_data.empty
+        or group_column not in valid_data.columns
     ):
         return pd.DataFrame()
 
-    group_data = valid_delay_data[
-        [
-            group_column,
-            "report_delay_hours"
-        ]
+    selected_columns = [
+        group_column,
+        "report_delay_hours"
+    ]
+
+    if "incident_id" in valid_data.columns:
+        selected_columns.append(
+            "incident_id"
+        )
+
+    working_data = valid_data[
+        selected_columns
     ].copy()
 
-    group_data[group_column] = (
-        group_data[group_column]
+    working_data[group_column] = (
+        working_data[group_column]
         .fillna("Unknown")
         .astype(str)
         .str.strip()
@@ -413,29 +593,22 @@ def prepare_group_delay_summary(
         )
     )
 
-    group_data["report_delay_hours"] = pd.to_numeric(
-        group_data["report_delay_hours"],
-        errors="coerce"
-    )
+    if "incident_id" in working_data.columns:
+        working_data = working_data.drop_duplicates(
+            subset=[
+                "incident_id",
+                group_column
+            ]
+        )
 
-    group_data = group_data.dropna(
-        subset=[
-            "report_delay_hours"
-        ]
-    )
-
-    if group_data.empty:
-        return pd.DataFrame()
-
-    summary = (
-        group_data
+    group_summary = (
+        working_data
         .groupby(
             group_column
         )["report_delay_hours"]
         .agg(
-            valid_records="count",
+            record_count="count",
             median_delay_hours="median",
-            mean_delay_hours="mean",
             p90_delay_hours=lambda values: values.quantile(
                 0.90
             )
@@ -443,72 +616,73 @@ def prepare_group_delay_summary(
         .reset_index()
     )
 
-    summary = summary[
-        summary["valid_records"]
-        >= minimum_records
+    group_summary = group_summary[
+        group_summary[
+            "record_count"
+        ] >= minimum_records
     ].copy()
 
-    summary = summary.sort_values(
-        [
-            "median_delay_hours",
-            "valid_records"
-        ],
-        ascending=[
-            False,
-            False
-        ]
-    )
-
-    return summary
-
-
-def get_group_display_name(group_column):
-    """
-    Return a readable group name for chart copy.
-    """
-    names = {
-        "crime_group": "Crime Group",
-        "location_group": "Location Group"
-    }
-
-    return names.get(
-        group_column,
-        group_column.replace(
-            "_",
-            " "
-        ).title()
+    return (
+        group_summary
+        .sort_values(
+            [
+                "median_delay_hours",
+                "record_count"
+            ],
+            ascending=[
+                False,
+                False
+            ]
+        )
+        .head(
+            maximum_groups
+        )
     )
 
 
-def create_group_median_delay_chart(
-    valid_delay_data,
-    group_column,
-    title,
-    minimum_records=MINIMUM_GROUP_RECORDS,
-    max_categories=15
+def get_delay_color(
+    delay_hours,
+    maximum_delay
 ):
     """
-    Create a horizontal median-delay chart.
-
-    Hover information includes:
-    - median delay
-    - 90th-percentile delay
-    - mean delay
-    - number of valid records
+    Assign a simple risk-oriented color based on relative median delay.
     """
-    summary = prepare_group_delay_summary(
-        valid_delay_data=valid_delay_data,
-        group_column=group_column,
-        minimum_records=minimum_records
+    if maximum_delay <= 0:
+        return "#6AC7B6"
+
+    ratio = float(
+        delay_hours
+        / maximum_delay
+    )
+
+    if ratio >= 0.75:
+        return "#D95F65"
+
+    if ratio >= 0.40:
+        return "#F2CC68"
+
+    return "#6AC7B6"
+
+
+def create_group_delay_chart(
+    data,
+    group_column,
+    title
+):
+    """
+    Create a median reporting-delay comparison chart.
+    """
+    group_data = prepare_group_delay_data(
+        data=data,
+        group_column=group_column
     )
 
     figure = go.Figure()
 
-    if summary.empty:
+    if group_data.empty:
         figure.add_annotation(
             text=(
-                "No groups meet the minimum "
-                f"{minimum_records}-record threshold."
+                "No groups meet the minimum valid-record threshold."
             ),
             x=0.5,
             y=0.5,
@@ -522,11 +696,7 @@ def create_group_median_delay_chart(
         )
 
         figure.update_layout(
-            title={
-                "text": title,
-                "x": 0,
-                "xanchor": "left"
-            },
+            title=title,
             height=GROUP_CHART_HEIGHT,
             paper_bgcolor="#0B111C",
             plot_bgcolor="#0B111C"
@@ -534,50 +704,16 @@ def create_group_median_delay_chart(
 
         return figure
 
-    chart_data = summary.head(
-        max_categories
-    ).sort_values(
+    chart_data = group_data.sort_values(
         "median_delay_hours",
         ascending=True
     )
 
-    bar_colors = []
-
-    maximum_median = chart_data[
-        "median_delay_hours"
-    ].max()
-
-    for median_value in chart_data[
-        "median_delay_hours"
-    ]:
-        if maximum_median <= 0:
-            bar_colors.append(
-                "#6AC7B6"
-            )
-        elif median_value >= maximum_median * 0.75:
-            bar_colors.append(
-                "#D95F65"
-            )
-        elif median_value >= maximum_median * 0.45:
-            bar_colors.append(
-                "#E9A85D"
-            )
-        elif median_value >= maximum_median * 0.20:
-            bar_colors.append(
-                "#F2CC68"
-            )
-        else:
-            bar_colors.append(
-                "#6AC7B6"
-            )
-
-    custom_data = chart_data[
-        [
-            "p90_delay_hours",
-            "mean_delay_hours",
-            "valid_records"
-        ]
-    ]
+    maximum_delay = float(
+        chart_data[
+            "median_delay_hours"
+        ].max()
+    )
 
     figure.add_trace(
         go.Bar(
@@ -589,15 +725,27 @@ def create_group_median_delay_chart(
             ],
             orientation="h",
             marker={
-                "color": bar_colors
+                "color": [
+                    get_delay_color(
+                        delay_hours=delay,
+                        maximum_delay=maximum_delay
+                    )
+                    for delay in chart_data[
+                        "median_delay_hours"
+                    ]
+                ]
             },
-            customdata=custom_data,
+            customdata=chart_data[
+                [
+                    "record_count",
+                    "p90_delay_hours"
+                ]
+            ],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "Median: %{x:.1f} hours<br>"
-                "P90: %{customdata[0]:.1f} hours<br>"
-                "Mean: %{customdata[1]:.1f} hours<br>"
-                "Valid records: %{customdata[2]:,}"
+                "Median delay: %{x:.1f} hours<br>"
+                "P90 delay: %{customdata[1]:.1f} hours<br>"
+                "Valid distinct incidents: %{customdata[0]:,}"
                 "<extra></extra>"
             )
         )
@@ -615,9 +763,9 @@ def create_group_median_delay_chart(
         },
         height=GROUP_CHART_HEIGHT,
         margin={
-            "l": 145,
-            "r": 24,
-            "t": 68,
+            "l": 190,
+            "r": 25,
+            "t": 70,
             "b": 55
         },
         paper_bgcolor="#0B111C",
@@ -628,7 +776,7 @@ def create_group_median_delay_chart(
         },
         xaxis={
             "title": {
-                "text": "Median Delay Hours"
+                "text": "Median Reporting Delay (Hours)"
             },
             "rangemode": "tozero",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
@@ -643,12 +791,12 @@ def create_group_median_delay_chart(
             "title": {
                 "text": ""
             },
+            "automargin": True,
+            "showgrid": False,
             "tickfont": {
                 "size": 10,
                 "color": "#CBD5E1"
-            },
-            "showgrid": False,
-            "automargin": True
+            }
         }
     )
 
@@ -656,175 +804,186 @@ def create_group_median_delay_chart(
 
 
 def get_highest_median_group(
-    valid_delay_data,
+    data,
     group_column
 ):
     """
-    Return the group with the highest median delay after applying
-    the minimum-record threshold.
+    Return the group with the highest eligible median delay.
     """
-    summary = prepare_group_delay_summary(
-        valid_delay_data=valid_delay_data,
+    group_data = prepare_group_delay_data(
+        data=data,
         group_column=group_column
     )
 
-    if summary.empty:
+    if group_data.empty:
         return {
             "group": "N/A",
-            "median_hours": pd.NA,
-            "p90_hours": pd.NA,
-            "valid_records": 0
+            "median_delay": pd.NA,
+            "p90_delay": pd.NA,
+            "record_count": 0
         }
 
-    top_row = summary.iloc[0]
+    top_row = group_data.sort_values(
+        "median_delay_hours",
+        ascending=False
+    ).iloc[
+        0
+    ]
 
     return {
         "group": top_row[
             group_column
         ],
-        "median_hours": top_row[
-            "median_delay_hours"
-        ],
-        "p90_hours": top_row[
-            "p90_delay_hours"
-        ],
-        "valid_records": int(
+        "median_delay": float(
             top_row[
-                "valid_records"
+                "median_delay_hours"
+            ]
+        ),
+        "p90_delay": float(
+            top_row[
+                "p90_delay_hours"
+            ]
+        ),
+        "record_count": int(
+            top_row[
+                "record_count"
             ]
         )
     }
 
 
-def show_delay_summary(data):
+def get_largest_delay_bucket(data):
     """
-    Display compact reporting-delay summary cards.
+    Return the largest delay bucket and its count.
     """
-    total_records = len(
-        data
-    )
-
-    valid_delay_data = get_valid_delay_data(
-        data
-    )
-
-    valid_count = len(
-        valid_delay_data
-    )
-
-    valid_coverage = calculate_percentage(
-        valid_count,
-        total_records
-    )
-
-    statistics = calculate_delay_statistics(
-        valid_delay_data
-    )
-
-    same_day_count = count_delay_bucket(
-        data,
-        "Same Day / Within 24 Hours"
-    )
-
-    over_seven_count = count_delay_bucket(
-        data,
-        "Over 7 Days"
-    )
-
-    same_day_percentage = calculate_percentage(
-        same_day_count,
-        valid_count
-    )
-
-    over_seven_percentage = calculate_percentage(
-        over_seven_count,
-        valid_count
-    )
-
     bucket_data = prepare_delay_bucket_data(
         data
     )
 
     if bucket_data.empty:
-        top_delay_bucket = "N/A"
-        top_delay_bucket_count = 0
-    else:
-        top_bucket_row = bucket_data.loc[
-            bucket_data[
-                "incident_count"
-            ].idxmax()
-        ]
+        return "N/A", 0
 
-        top_delay_bucket = top_bucket_row[
+    top_row = bucket_data.sort_values(
+        "incident_count",
+        ascending=False
+    ).iloc[
+        0
+    ]
+
+    return (
+        top_row[
             "delay_bucket"
-        ]
-
-        top_delay_bucket_count = int(
-            top_bucket_row[
+        ],
+        int(
+            top_row[
                 "incident_count"
             ]
         )
+    )
+
+
+def show_delay_summary(data):
+    """
+    Display reporting-delay overview cards.
+    """
+    statistics = calculate_delay_statistics(
+        data
+    )
+
+    (
+        top_delay_bucket,
+        top_delay_bucket_count
+    ) = get_largest_delay_bucket(
+        data
+    )
 
     overview_items = [
         {
             "label": "Selected Incidents",
             "value": format_number(
-                total_records
+                statistics[
+                    "total_records"
+                ]
             ),
-            "meta": "Current filtered view",
-            "numeric": True
+            "meta": "Distinct filtered incidents",
+            "numeric": True,
+            "metric_key": "selected_incidents"
         },
         {
             "label": "Valid Delay Coverage",
             "value": format_percentage(
-                valid_coverage
+                statistics[
+                    "valid_coverage"
+                ]
             ),
-            "meta": f"{format_number(valid_count)} usable records",
-            "numeric": True
+            "meta": (
+                f"{format_number(statistics['valid_count'])} "
+                "usable incidents"
+            ),
+            "numeric": True,
+            "metric_key": "valid_delay_coverage"
         },
         {
             "label": "Median Delay",
-            "value": format_delay(
+            "value": format_delay_duration(
                 statistics[
-                    "median_hours"
+                    "median_delay"
                 ]
             ),
-            "meta": "Typical reporting delay",
-            "numeric": True
+            "meta": "Middle valid delay",
+            "numeric": True,
+            "metric_key": "median_delay"
         },
         {
             "label": "P90 Delay",
-            "value": format_delay(
+            "value": format_delay_duration(
                 statistics[
-                    "p90_hours"
+                    "p90_delay"
                 ]
             ),
             "meta": "90% reported within",
-            "numeric": True
+            "numeric": True,
+            "metric_key": "p90_delay"
         },
         {
-            "label": "Same-Day Share",
+            "label": "Reported Within 24 Hours",
             "value": format_percentage(
-                same_day_percentage
+                statistics[
+                    "within_24_share"
+                ]
             ),
-            "meta": f"{format_number(same_day_count)} records",
-            "numeric": True
+            "meta": (
+                f"{format_number(statistics['within_24_count'])} "
+                "valid incidents"
+            ),
+            "numeric": True,
+            "metric_key": "same_day_share"
         },
         {
-            "label": "Over 7 Days",
+            "label": "Reported After 7 Days",
             "value": format_percentage(
-                over_seven_percentage
+                statistics[
+                    "over_seven_day_share"
+                ]
             ),
-            "meta": f"{format_number(over_seven_count)} records",
-            "numeric": True
+            "meta": (
+                f"{format_number(statistics['over_seven_day_count'])} "
+                "valid incidents"
+            ),
+            "numeric": True,
+            "metric_key": "over_seven_day_share"
         },
         {
-            "label": "Top Delay Bucket",
+            "label": "Largest Delay Bucket",
             "value": top_delay_bucket,
-            "meta": "Most common range",
+            "meta": "Most common elapsed range",
             "badge": format_number(
                 top_delay_bucket_count
-            )
+            ),
+            # "help": (
+            #     "The elapsed reporting-delay bucket containing the "
+            #     "largest number of distinct selected incidents."
+            # )
         }
     ]
 
@@ -832,64 +991,87 @@ def show_delay_summary(data):
         overview_items
     )
 
-    if pd.isna(
-        statistics[
-            "median_hours"
-        ]
-    ):
-        show_insight(
-            "Valid reporting-delay statistics are unavailable for "
-            "the current filtered selection."
+    show_insight(
+        f"The median valid reporting delay is "
+        f"{format_delay_duration(statistics['median_delay'])}, while "
+        f"90% of valid incidents were reported within "
+        f"{format_delay_duration(statistics['p90_delay'])}. "
+        f"{format_percentage(statistics['within_24_share'])} of valid "
+        f"incidents were reported within 24 elapsed hours."
+    )
+
+    show_info_hint(
+        "Delay denominator",
+        (
+            "Median, P90, within-24-hour share, and after-seven-day share "
+            "use only distinct incidents with valid non-negative reporting "
+            "delays. Valid delay coverage compares those usable incidents "
+            "with all distinct selected incidents."
         )
-    else:
-        show_insight(
-            f"The median reporting delay is "
-            f"{format_delay(statistics['median_hours'])}, while the "
-            f"90th-percentile delay is "
-            f"{format_delay(statistics['p90_hours'])}. "
-            f"{format_percentage(same_day_percentage)} of valid records "
-            f"were reported within 24 hours."
-        )
+    )
 
-    return {
-        "valid_delay_data": valid_delay_data,
-        "statistics": statistics,
-        "valid_count": valid_count,
-        "valid_coverage": valid_coverage,
-        "same_day_count": same_day_count,
-        "same_day_percentage": same_day_percentage,
-        "over_seven_count": over_seven_count,
-        "over_seven_percentage": over_seven_percentage,
-        "top_delay_bucket": top_delay_bucket,
-        "top_delay_bucket_count": top_delay_bucket_count
-    }
+    # show_info_hint(
+    #     "Within 24 hours definition",
+    #     (
+    #         "Reported Within 24 Hours is based on elapsed time between "
+    #         "occurrence and report. It does not require the report to occur "
+    #         "on the same calendar date."
+    #     )
+    # )
+
+    return statistics
 
 
-def show_primary_delay_charts(
+def show_delay_distribution(
     data,
-    summary
+    statistics
 ):
     """
-    Display the ordered bucket distribution and median delay by
-    crime group.
+    Display the ordered delay-bucket chart.
     """
-    bucket_chart = create_ordered_delay_bucket_chart(
+    figure = create_delay_bucket_chart(
         data
     )
 
-    crime_group_chart = create_group_median_delay_chart(
-        valid_delay_data=summary[
-            "valid_delay_data"
-        ],
-        group_column="crime_group",
-        title="Median Delay by Crime Group"
+    st.plotly_chart(
+        figure,
+        use_container_width=True,
+        key="reporting_delay_bucket_chart",
+        config=get_chart_config()
     )
 
-    top_crime_group = get_highest_median_group(
-        valid_delay_data=summary[
-            "valid_delay_data"
-        ],
+    show_insight(
+        f"{format_number(statistics['within_24_count'])} valid incidents "
+        f"were reported within 24 elapsed hours, while "
+        f"{format_number(statistics['over_seven_day_count'])} were "
+        f"reported after more than seven days."
+    )
+
+
+def show_group_delay_charts(data):
+    """
+    Display median reporting delay by crime and location group.
+    """
+    crime_chart = create_group_delay_chart(
+        data=data,
+        group_column="crime_group",
+        title="Median Reporting Delay by Crime Group"
+    )
+
+    location_chart = create_group_delay_chart(
+        data=data,
+        group_column="location_group",
+        title="Median Reporting Delay by Location Group"
+    )
+
+    crime_summary = get_highest_median_group(
+        data=data,
         group_column="crime_group"
+    )
+
+    location_summary = get_highest_median_group(
+        data=data,
+        group_column="location_group"
     )
 
     chart_left, chart_right = st.columns(
@@ -899,17 +1081,17 @@ def show_primary_delay_charts(
 
     with chart_left:
         st.plotly_chart(
-            bucket_chart,
+            crime_chart,
             use_container_width=True,
-            key="delay_ordered_bucket_chart",
+            key="reporting_delay_crime_group_chart",
             config=get_chart_config()
         )
 
     with chart_right:
         st.plotly_chart(
-            crime_group_chart,
+            location_chart,
             use_container_width=True,
-            key="delay_median_by_crime_group_chart",
+            key="reporting_delay_location_group_chart",
             config=get_chart_config()
         )
 
@@ -919,142 +1101,147 @@ def show_primary_delay_charts(
     )
 
     with insight_left:
-        show_insight(
-            f"{summary['top_delay_bucket']} is the most common "
-            f"reporting-delay bucket with "
-            f"{format_number(summary['top_delay_bucket_count'])} records."
-        )
-
-    with insight_right:
-        if pd.isna(
-            top_crime_group[
-                "median_hours"
-            ]
-        ):
+        if crime_summary[
+            "group"
+        ] == "N/A":
             show_insight(
-                f"No crime group meets the minimum "
-                f"{MINIMUM_GROUP_RECORDS}-record threshold."
+                "No crime groups meet the minimum valid-delay "
+                "record threshold."
             )
+
         else:
             show_insight(
-                f"{top_crime_group['group']} has the highest median "
-                f"reporting delay among eligible crime groups at "
-                f"{format_delay(top_crime_group['median_hours'])}. "
-                f"This result is based on "
-                f"{format_number(top_crime_group['valid_records'])} "
-                f"valid records."
+                f"{crime_summary['group']} has the highest displayed "
+                f"median crime-group delay at "
+                f"{format_delay_duration(crime_summary['median_delay'])}, "
+                f"based on "
+                f"{format_number(crime_summary['record_count'])} valid "
+                f"distinct incidents."
             )
 
+    with insight_right:
+        if location_summary[
+            "group"
+        ] == "N/A":
+            show_insight(
+                "No location groups meet the minimum valid-delay "
+                "record threshold."
+            )
 
-def show_location_delay_chart(summary):
+        else:
+            show_insight(
+                f"{location_summary['group']} has the highest displayed "
+                f"median location-group delay at "
+                f"{format_delay_duration(location_summary['median_delay'])}, "
+                f"based on "
+                f"{format_number(location_summary['record_count'])} valid "
+                f"distinct incidents."
+            )
+
+    show_info_hint(
+        "Group comparison threshold",
+        (
+            f"Only groups with at least {MINIMUM_GROUP_RECORDS} valid "
+            "distinct reporting-delay records are displayed. This reduces "
+            "unstable comparisons based on very small samples."
+        )
+    )
+
+    # show_info_hint(
+    #     "Chart units",
+    #     (
+    #         "Group comparison axes use hours for a consistent numeric scale. "
+    #         "Insight text converts larger values into days for readability."
+    #     )
+    # )
+
+
+def get_high_delay_records(data):
     """
-    Display median reporting delay by location group.
+    Return records with valid reporting delays above seven days.
     """
-    location_chart = create_group_median_delay_chart(
-        valid_delay_data=summary[
-            "valid_delay_data"
-        ],
-        group_column="location_group",
-        title="Median Delay by Location Group",
-        max_categories=12
+    valid_data = get_valid_delay_data(
+        data
     )
 
-    location_chart.update_layout(
-        height=430
-    )
+    if valid_data.empty:
+        return pd.DataFrame()
 
-    st.plotly_chart(
-        location_chart,
-        use_container_width=True,
-        key="delay_median_by_location_group_chart",
-        config=get_chart_config()
-    )
-
-    top_location_group = get_highest_median_group(
-        valid_delay_data=summary[
-            "valid_delay_data"
-        ],
-        group_column="location_group"
-    )
-
-    if pd.isna(
-        top_location_group[
-            "median_hours"
+    return (
+        valid_data[
+            valid_data[
+                "report_delay_hours"
+            ] > 168
         ]
-    ):
-        show_insight(
-            f"No location group meets the minimum "
-            f"{MINIMUM_GROUP_RECORDS}-record threshold."
+        .sort_values(
+            "report_delay_hours",
+            ascending=False
         )
-    else:
-        show_insight(
-            f"{top_location_group['group']} has the highest median "
-            f"reporting delay among eligible location groups at "
-            f"{format_delay(top_location_group['median_hours'])}. "
-            f"Its 90th-percentile delay is "
-            f"{format_delay(top_location_group['p90_hours'])}."
-        )
+        .copy()
+    )
 
 
-def show_high_delay_review(valid_delay_data):
+def show_high_delay_review(data):
     """
-    Display a collapsed table containing the longest valid delays.
+    Display high-delay records in a collapsed review panel.
     """
+    high_delay_data = get_high_delay_records(
+        data
+    )
+
     with st.expander(
-        "High-Delay Record Review",
+        (
+            "High-Delay Record Review "
+            f"({format_number(len(high_delay_data))})"
+        ),
         expanded=False
     ):
         show_info_hint(
-            "About this review panel",
+            "Review scope",
             (
-                "Use this table to inspect records with the longest "
-                "valid reporting delays. Extreme values can strongly "
-                "affect averages, which is why the dashboard uses the "
-                "median as its primary delay measure."
+                "This table contains distinct incidents with valid elapsed "
+                "reporting delays greater than seven days. It is intended "
+                "for validation and investigation."
             )
         )
 
-        if valid_delay_data.empty:
-            st.info(
-                "No valid reporting-delay records are available for "
-                "the selected filters."
+        if high_delay_data.empty:
+            st.success(
+                "No valid reporting-delay records exceed seven days "
+                "in the current filtered view."
             )
 
             return
 
         show_compact_record_note(
-            "Showing the 25 records with the longest valid reporting "
-            "delays in the current filtered view."
+            "Showing the first 25 incidents with the longest valid "
+            "reporting delays."
         )
 
-        delay_columns = [
+        review_columns = [
             "incident_id",
             "case_number",
             "occurred_datetime",
             "reported_datetime",
             "crime_group",
-            "disposition_group",
             "location_group",
-            "delay_bucket",
+            "disposition_group",
             "report_delay_hours",
-            "report_delay_days"
+            "delay_bucket"
         ]
 
-        available_columns = [
+        visible_columns = [
             column
-            for column in delay_columns
-            if column in valid_delay_data.columns
+            for column in review_columns
+            if column in high_delay_data.columns
         ]
 
         st.dataframe(
-            valid_delay_data[
-                available_columns
-            ]
-            .sort_values(
-                "report_delay_hours",
-                ascending=False
-            )
-            .head(25),
+            high_delay_data[
+                visible_columns
+            ].head(
+                25
+            ),
             use_container_width=True,
             hide_index=True
         )
@@ -1062,34 +1249,32 @@ def show_high_delay_review(valid_delay_data):
 
 def show_reporting_delay(data):
     """
-    Display the complete reporting-timeliness section.
+    Display the complete reporting-delay section.
     """
     show_section_banner(
-        eyebrow="Timeliness Intelligence",
+        eyebrow="Operational Timeliness",
         title="Reporting Timeliness Profile",
         description=(
-            "Measure how quickly incidents are reported using median, "
-            "90th-percentile, and ordered delay-bucket analysis."
+            "Measure elapsed reporting time using median, P90, ordered "
+            "delay buckets, and reliable group-level comparisons."
         )
     )
 
-    summary = show_delay_summary(
+    statistics = show_delay_summary(
         data
     )
 
-    st.divider()
+    # st.divider()
 
-    show_primary_delay_charts(
+    show_delay_distribution(
         data,
-        summary
+        statistics
     )
 
-    show_location_delay_chart(
-        summary
+    show_group_delay_charts(
+        data
     )
 
     show_high_delay_review(
-        summary[
-            "valid_delay_data"
-        ]
+        data
     )

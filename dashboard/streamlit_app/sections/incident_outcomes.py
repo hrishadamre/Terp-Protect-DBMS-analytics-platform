@@ -5,17 +5,18 @@ Purpose:
 Display the case resolution profile for the Terp Protect dashboard.
 
 Responsibilities:
-- Summarize arrest-related, pending, and closed outcomes
-- Display major case-outcome volume
-- Display detailed disposition volume
-- Compare normalized outcome composition across major crime groups
-- Avoid repeating general crime-group volume charts
+- Summarize major and detailed case outcomes
+- Display closed, pending, arrest-related, and other dispositions
+- Compare normalized outcome composition across high-volume crime groups
+- Apply minimum sample thresholds to normalized comparisons
+- Clearly distinguish outcome classification from arrest-record matching
 """
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from components.charts import get_chart_config
 from components.layout import (
     show_compact_overview_strip,
     show_info_hint,
@@ -31,17 +32,21 @@ from components.metrics import (
 
 MAJOR_OUTCOME_CHART_HEIGHT = 430
 DETAILED_OUTCOME_CHART_HEIGHT = 470
-OUTCOME_COMPOSITION_CHART_HEIGHT = 530
+OUTCOME_COMPOSITION_CHART_HEIGHT = 540
 
 TOP_DETAILED_DISPOSITIONS = 15
 TOP_CRIME_GROUPS = 10
+MINIMUM_CRIME_GROUP_RECORDS = 20
 
 
 OUTCOME_ORDER = [
     "Closed / Cleared",
     "Pending / Active",
     "Arrest-Related",
-    "Other"
+    "Unfounded",
+    "Summons / Warrant Issued",
+    "Other",
+    "Unknown"
 ]
 
 
@@ -49,47 +54,40 @@ OUTCOME_COLORS = {
     "Closed / Cleared": "#6AC7B6",
     "Pending / Active": "#F2CC68",
     "Arrest-Related": "#E78A98",
-    "Other": "#AAB7C8"
+    "Unfounded": "#8ED8F3",
+    "Summons / Warrant Issued": "#B6A6E9",
+    "Other": "#AAB7C8",
+    "Unknown": "#64748B"
 }
 
 
-def safe_binary_sum(
-    data,
-    column
+def safe_percentage(
+    numerator,
+    denominator
 ):
     """
-    Safely sum a binary indicator column.
+    Calculate a percentage safely.
     """
-    if (
-        data is None
-        or data.empty
-        or column not in data.columns
-    ):
-        return 0
-
-    values = pd.to_numeric(
-        data[column],
+    numeric_numerator = pd.to_numeric(
+        numerator,
         errors="coerce"
-    ).fillna(0)
-
-    return int(
-        values.sum()
     )
 
+    numeric_denominator = pd.to_numeric(
+        denominator,
+        errors="coerce"
+    )
 
-def calculate_percentage(
-    count,
-    total
-):
-    """
-    Calculate a safe percentage.
-    """
-    if total <= 0:
+    if (
+        pd.isna(numeric_numerator)
+        or pd.isna(numeric_denominator)
+        or numeric_denominator <= 0
+    ):
         return 0.0
 
-    return (
-        count
-        / total
+    return float(
+        numeric_numerator
+        / numeric_denominator
         * 100
     )
 
@@ -116,7 +114,7 @@ def shorten_label(
     maximum_length=40
 ):
     """
-    Shorten long chart labels while preserving full values in hover.
+    Shorten a long label for display.
     """
     cleaned_value = clean_category_value(
         value
@@ -133,95 +131,237 @@ def shorten_label(
     )
 
 
-def prepare_major_outcome_data(data):
+def distinct_incident_count(data):
     """
-    Prepare incident counts by major disposition group.
+    Return the number of distinct incidents.
     """
-    if (
-        data is None
-        or data.empty
-        or "disposition_group" not in data.columns
-    ):
-        return pd.DataFrame()
+    if data is None or data.empty:
+        return 0
 
-    outcome_data = data[
-        [
-            "disposition_group"
-        ]
-    ].copy()
-
-    outcome_data["disposition_group"] = (
-        outcome_data["disposition_group"]
-        .apply(
-            clean_category_value
+    if "incident_id" in data.columns:
+        return int(
+            data["incident_id"]
+            .dropna()
+            .nunique()
         )
+
+    return len(
+        data
     )
 
-    outcome_summary = (
-        outcome_data
-        .groupby(
-            "disposition_group"
-        )
-        .size()
-        .reset_index(
-            name="incident_count"
-        )
-        .sort_values(
-            "incident_count",
-            ascending=False
-        )
+
+def get_detail_disposition_column(data):
+    """
+    Return the first available detailed disposition column.
+    """
+    candidate_columns = [
+        "disposition",
+        "disposition_detail",
+        "disposition_clean",
+        "case_disposition"
+    ]
+
+    for column in candidate_columns:
+        if column in data.columns:
+            return column
+
+    return None
+
+
+def normalize_outcome_label(value):
+    """
+    Normalize source disposition values into major operational groups.
+
+    CBE is not expanded into a specific meaning because the source
+    abbreviation should be confirmed using official documentation.
+    """
+    cleaned_value = clean_category_value(
+        value
     )
 
-    total_incidents = outcome_summary[
-        "incident_count"
-    ].sum()
-
-    outcome_summary["percentage"] = (
-        outcome_summary["incident_count"]
-        / total_incidents
-        * 100
-        if total_incidents > 0
-        else 0.0
-    )
-
-    return outcome_summary
-
-
-def get_outcome_color(outcome):
-    """
-    Return a semantic color based on the outcome label.
-    """
-    normalized_outcome = str(
-        outcome
-    ).strip().lower()
+    lower_value = cleaned_value.lower()
 
     if any(
-        keyword in normalized_outcome
+        keyword in lower_value
         for keyword in [
             "closed",
             "cleared"
         ]
     ):
-        return "#6AC7B6"
+        return "Closed / Cleared"
 
     if any(
-        keyword in normalized_outcome
+        keyword in lower_value
         for keyword in [
             "pending",
-            "active"
+            "active",
+            "investigation"
         ]
     ):
-        return "#F2CC68"
+        return "Pending / Active"
 
-    if "arrest" in normalized_outcome:
-        return "#E78A98"
+    if "arrest" in lower_value:
+        return "Arrest-Related"
 
-    return "#AAB7C8"
+    if "unfounded" in lower_value:
+        return "Unfounded"
+
+    if any(
+        keyword in lower_value
+        for keyword in [
+            "summons",
+            "warrant"
+        ]
+    ):
+        return "Summons / Warrant Issued"
+
+    if lower_value == "unknown":
+        return "Unknown"
+
+    return "Other"
+
+
+def prepare_major_outcome_data(data):
+    """
+    Prepare distinct incident counts by major outcome group.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    working_data = data.copy()
+
+    if "disposition_group" in working_data.columns:
+        working_data["_outcome_group"] = (
+            working_data["disposition_group"]
+            .apply(
+                normalize_outcome_label
+            )
+        )
+
+    else:
+        working_data["_outcome_group"] = "Other"
+
+        if "is_closed" in working_data.columns:
+            closed_mask = (
+                pd.to_numeric(
+                    working_data["is_closed"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+            working_data.loc[
+                closed_mask,
+                "_outcome_group"
+            ] = "Closed / Cleared"
+
+        if "is_pending" in working_data.columns:
+            pending_mask = (
+                pd.to_numeric(
+                    working_data["is_pending"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+            working_data.loc[
+                pending_mask,
+                "_outcome_group"
+            ] = "Pending / Active"
+
+        if "is_arrest_related" in working_data.columns:
+            arrest_mask = (
+                pd.to_numeric(
+                    working_data["is_arrest_related"],
+                    errors="coerce"
+                ).fillna(0)
+                == 1
+            )
+
+            working_data.loc[
+                arrest_mask,
+                "_outcome_group"
+            ] = "Arrest-Related"
+
+    if "incident_id" in working_data.columns:
+        summary = (
+            working_data
+            .groupby(
+                "_outcome_group"
+            )["incident_id"]
+            .nunique()
+            .reindex(
+                OUTCOME_ORDER,
+                fill_value=0
+            )
+            .rename(
+                "incident_count"
+            )
+            .reset_index()
+        )
+
+    else:
+        summary = (
+            working_data["_outcome_group"]
+            .value_counts()
+            .reindex(
+                OUTCOME_ORDER,
+                fill_value=0
+            )
+            .rename(
+                "incident_count"
+            )
+            .reset_index()
+        )
+
+    summary.columns = [
+        "disposition_group",
+        "incident_count"
+    ]
+
+    summary = summary[
+        summary["incident_count"] > 0
+    ].copy()
+
+    total_incidents = int(
+        summary["incident_count"]
+        .sum()
+    )
+
+    summary["percentage"] = summary[
+        "incident_count"
+    ].apply(
+        lambda count: safe_percentage(
+            count,
+            total_incidents
+        )
+    )
+
+    return summary.sort_values(
+        [
+            "incident_count",
+            "disposition_group"
+        ],
+        ascending=[
+            False,
+            True
+        ]
+    )
+
+
+def get_outcome_color(outcome):
+    """
+    Return the semantic color assigned to an outcome group.
+    """
+    return OUTCOME_COLORS.get(
+        outcome,
+        "#AAB7C8"
+    )
 
 
 def create_major_outcome_chart(data):
     """
-    Create the major case-outcome volume chart.
+    Create the major case outcome volume chart.
     """
     outcome_summary = prepare_major_outcome_data(
         data
@@ -257,15 +397,6 @@ def create_major_outcome_chart(data):
         ascending=True
     )
 
-    colors = [
-        get_outcome_color(
-            outcome
-        )
-        for outcome in chart_data[
-            "disposition_group"
-        ]
-    ]
-
     figure.add_trace(
         go.Bar(
             x=chart_data[
@@ -276,11 +407,14 @@ def create_major_outcome_chart(data):
             ],
             orientation="h",
             marker={
-                "color": colors,
-                "line": {
-                    "color": "rgba(255, 255, 255, 0.10)",
-                    "width": 1
-                }
+                "color": [
+                    get_outcome_color(
+                        outcome
+                    )
+                    for outcome in chart_data[
+                        "disposition_group"
+                    ]
+                ]
             },
             customdata=chart_data[
                 [
@@ -289,8 +423,8 @@ def create_major_outcome_chart(data):
             ],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "Incidents: %{x:,}<br>"
-                "Share: %{customdata[0]:.1f}%"
+                "Distinct incidents: %{x:,}<br>"
+                "Share of selected incidents: %{customdata[0]:.1f}%"
                 "<extra></extra>"
             )
         )
@@ -308,7 +442,7 @@ def create_major_outcome_chart(data):
         },
         height=MAJOR_OUTCOME_CHART_HEIGHT,
         margin={
-            "l": 145,
+            "l": 170,
             "r": 24,
             "t": 68,
             "b": 55
@@ -321,27 +455,19 @@ def create_major_outcome_chart(data):
         },
         xaxis={
             "title": {
-                "text": "Incident Count"
+                "text": "Distinct Incident Count"
             },
             "rangemode": "tozero",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
                 "text": ""
             },
             "showgrid": False,
-            "automargin": True,
-            "tickfont": {
-                "size": 10,
-                "color": "#CBD5E1"
-            }
+            "automargin": True
         }
     )
 
@@ -353,41 +479,68 @@ def prepare_detailed_disposition_data(
     maximum_categories=TOP_DETAILED_DISPOSITIONS
 ):
     """
-    Prepare the highest-volume detailed dispositions.
+    Prepare distinct incident counts by detailed disposition.
     """
-    if (
-        data is None
-        or data.empty
-        or "disposition" not in data.columns
-    ):
+    if data is None or data.empty:
         return pd.DataFrame()
 
-    disposition_data = data[
-        [
-            "disposition"
-        ]
+    disposition_column = get_detail_disposition_column(
+        data
+    )
+
+    if disposition_column is None:
+        return pd.DataFrame()
+
+    selected_columns = [
+        disposition_column
+    ]
+
+    if "incident_id" in data.columns:
+        selected_columns.append(
+            "incident_id"
+        )
+
+    working_data = data[
+        selected_columns
     ].copy()
 
-    disposition_data["disposition"] = (
-        disposition_data["disposition"]
+    working_data[disposition_column] = (
+        working_data[disposition_column]
         .apply(
             clean_category_value
         )
     )
 
-    disposition_summary = (
-        disposition_data
-        .groupby(
-            "disposition"
+    if "incident_id" in working_data.columns:
+        summary = (
+            working_data
+            .groupby(
+                disposition_column
+            )["incident_id"]
+            .nunique()
+            .reset_index(
+                name="incident_count"
+            )
         )
-        .size()
-        .reset_index(
-            name="incident_count"
+
+    else:
+        summary = (
+            working_data
+            .groupby(
+                disposition_column
+            )
+            .size()
+            .reset_index(
+                name="incident_count"
+            )
         )
+
+    summary = (
+        summary
         .sort_values(
             [
                 "incident_count",
-                "disposition"
+                disposition_column
             ],
             ascending=[
                 False,
@@ -397,16 +550,21 @@ def prepare_detailed_disposition_data(
         .head(
             maximum_categories
         )
+        .rename(
+            columns={
+                disposition_column: "disposition"
+            }
+        )
     )
 
-    disposition_summary["display_disposition"] = (
-        disposition_summary["disposition"]
+    summary["display_disposition"] = (
+        summary["disposition"]
         .apply(
             shorten_label
         )
     )
 
-    return disposition_summary
+    return summary
 
 
 def create_detailed_disposition_chart(data):
@@ -470,7 +628,7 @@ def create_detailed_disposition_chart(data):
             ],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
-                "Incidents: %{x:,}"
+                "Distinct incidents: %{x:,}"
                 "<extra></extra>"
             )
         )
@@ -501,27 +659,19 @@ def create_detailed_disposition_chart(data):
         },
         xaxis={
             "title": {
-                "text": "Incident Count"
+                "text": "Distinct Incident Count"
             },
             "rangemode": "tozero",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
                 "text": ""
             },
             "showgrid": False,
-            "automargin": True,
-            "tickfont": {
-                "size": 10,
-                "color": "#CBD5E1"
-            }
+            "automargin": True
         }
     )
 
@@ -530,10 +680,12 @@ def create_detailed_disposition_chart(data):
 
 def prepare_crime_outcome_composition(data):
     """
-    Prepare a normalized crime-group outcome composition table.
+    Prepare normalized outcome composition by crime group.
 
-    Each crime-group row sums to 100%, making outcome patterns
-    comparable even when crime groups have different total volumes.
+    Rules:
+    - only crime groups with at least the minimum incident count are used
+    - only the highest-volume eligible groups are displayed
+    - each row uses all incidents in that crime group as the denominator
     """
     required_columns = {
         "crime_group",
@@ -550,14 +702,23 @@ def prepare_crime_outcome_composition(data):
         return {
             "count_data": pd.DataFrame(),
             "percentage_data": pd.DataFrame(),
-            "crime_totals": pd.Series(dtype=int)
+            "crime_totals": pd.Series(
+                dtype=int
+            )
         }
 
+    selected_columns = [
+        "crime_group",
+        "disposition_group"
+    ]
+
+    if "incident_id" in data.columns:
+        selected_columns.append(
+            "incident_id"
+        )
+
     working_data = data[
-        [
-            "crime_group",
-            "disposition_group"
-        ]
+        selected_columns
     ].copy()
 
     working_data["crime_group"] = (
@@ -567,18 +728,38 @@ def prepare_crime_outcome_composition(data):
         )
     )
 
-    working_data["disposition_group"] = (
+    working_data["outcome_group"] = (
         working_data["disposition_group"]
         .apply(
-            clean_category_value
+            normalize_outcome_label
         )
     )
 
-    top_crime_groups = (
-        working_data[
-            "crime_group"
+    if "incident_id" in working_data.columns:
+        crime_totals_all = (
+            working_data
+            .groupby(
+                "crime_group"
+            )["incident_id"]
+            .nunique()
+            .sort_values(
+                ascending=False
+            )
+        )
+
+    else:
+        crime_totals_all = (
+            working_data[
+                "crime_group"
+            ]
+            .value_counts()
+        )
+
+    eligible_crime_groups = (
+        crime_totals_all[
+            crime_totals_all
+            >= MINIMUM_CRIME_GROUP_RECORDS
         ]
-        .value_counts()
         .head(
             TOP_CRIME_GROUPS
         )
@@ -586,26 +767,71 @@ def prepare_crime_outcome_composition(data):
         .tolist()
     )
 
-    filtered_data = working_data[
-        working_data["crime_group"].isin(
-            top_crime_groups
-        )
-    ].copy()
-
-    if filtered_data.empty:
+    if not eligible_crime_groups:
         return {
             "count_data": pd.DataFrame(),
             "percentage_data": pd.DataFrame(),
-            "crime_totals": pd.Series(dtype=int)
+            "crime_totals": pd.Series(
+                dtype=int
+            )
         }
 
-    count_data = pd.crosstab(
-        filtered_data[
-            "crime_group"
-        ],
-        filtered_data[
-            "disposition_group"
-        ]
+    eligible_data = working_data[
+        working_data["crime_group"].isin(
+            eligible_crime_groups
+        )
+    ].copy()
+
+    if "incident_id" in eligible_data.columns:
+        grouped_counts = (
+            eligible_data
+            .groupby(
+                [
+                    "crime_group",
+                    "outcome_group"
+                ]
+            )["incident_id"]
+            .nunique()
+            .reset_index(
+                name="incident_count"
+            )
+        )
+
+    else:
+        grouped_counts = (
+            eligible_data
+            .groupby(
+                [
+                    "crime_group",
+                    "outcome_group"
+                ]
+            )
+            .size()
+            .reset_index(
+                name="incident_count"
+            )
+        )
+
+    count_data = (
+        grouped_counts
+        .pivot(
+            index="crime_group",
+            columns="outcome_group",
+            values="incident_count"
+        )
+        .fillna(0)
+        .reindex(
+            index=eligible_crime_groups,
+            columns=[
+                outcome
+                for outcome in OUTCOME_ORDER
+                if outcome in grouped_counts[
+                    "outcome_group"
+                ].unique()
+            ],
+            fill_value=0
+        )
+        .astype(int)
     )
 
     crime_totals = count_data.sum(
@@ -653,81 +879,9 @@ def prepare_crime_outcome_composition(data):
     }
 
 
-def get_ordered_outcome_columns(available_columns):
-    """
-    Arrange outcome columns in a meaningful semantic order.
-
-    Any source-specific categories not recognized are appended after
-    the main semantic categories.
-    """
-    ordered_columns = []
-
-    semantic_matches = {
-        "Closed / Cleared": [],
-        "Pending / Active": [],
-        "Arrest-Related": [],
-        "Other": []
-    }
-
-    for column in available_columns:
-        normalized_column = str(
-            column
-        ).strip().lower()
-
-        if any(
-            keyword in normalized_column
-            for keyword in [
-                "closed",
-                "cleared"
-            ]
-        ):
-            semantic_matches[
-                "Closed / Cleared"
-            ].append(
-                column
-            )
-
-        elif any(
-            keyword in normalized_column
-            for keyword in [
-                "pending",
-                "active"
-            ]
-        ):
-            semantic_matches[
-                "Pending / Active"
-            ].append(
-                column
-            )
-
-        elif "arrest" in normalized_column:
-            semantic_matches[
-                "Arrest-Related"
-            ].append(
-                column
-            )
-
-        else:
-            semantic_matches[
-                "Other"
-            ].append(
-                column
-            )
-
-    for semantic_group in OUTCOME_ORDER:
-        ordered_columns.extend(
-            semantic_matches[
-                semantic_group
-            ]
-        )
-
-    return ordered_columns
-
-
 def create_crime_outcome_composition_chart(data):
     """
-    Create a 100% stacked horizontal bar chart showing outcome
-    composition for major crime groups.
+    Create a 100% stacked outcome composition chart.
     """
     composition = prepare_crime_outcome_composition(
         data
@@ -749,7 +903,10 @@ def create_crime_outcome_composition_chart(data):
 
     if percentage_data.empty:
         figure.add_annotation(
-            text="Crime-group outcome composition is unavailable.",
+            text=(
+                "No crime groups meet the minimum incident threshold "
+                "for outcome composition analysis."
+            ),
             x=0.5,
             y=0.5,
             xref="paper",
@@ -770,63 +927,55 @@ def create_crime_outcome_composition_chart(data):
 
         return figure
 
-    ordered_outcomes = get_ordered_outcome_columns(
-        percentage_data.columns.tolist()
-    )
-
-    fallback_colors = [
-        "#6AC7B6",
-        "#F2CC68",
-        "#E78A98",
-        "#AAB7C8",
-        "#8ED8F3",
-        "#B6A6E9",
-        "#F2B880",
-        "#C5D3E3"
-    ]
-
-    for index, outcome in enumerate(
-        ordered_outcomes
-    ):
-        outcome_color = get_outcome_color(
-            outcome
+    display_labels = {
+        crime_group: (
+            f"{crime_group} "
+            f"(n={format_number(crime_totals.loc[crime_group])})"
         )
+        for crime_group in percentage_data.index
+    }
 
-        if outcome_color == "#AAB7C8":
-            outcome_color = fallback_colors[
-                index % len(
-                    fallback_colors
-                )
-            ]
-
+    for outcome in percentage_data.columns:
         figure.add_trace(
             go.Bar(
-                y=percentage_data.index.tolist(),
+                y=[
+                    display_labels[
+                        crime_group
+                    ]
+                    for crime_group in percentage_data.index
+                ],
                 x=percentage_data[
                     outcome
                 ],
                 name=outcome,
                 orientation="h",
                 marker={
-                    "color": outcome_color
+                    "color": get_outcome_color(
+                        outcome
+                    )
                 },
                 customdata=[
                     [
-                        count_data.loc[
-                            crime_group,
-                            outcome
-                        ],
-                        crime_totals.loc[
-                            crime_group
-                        ]
+                        int(
+                            count_data.loc[
+                                crime_group,
+                                outcome
+                            ]
+                        ),
+                        int(
+                            crime_totals.loc[
+                                crime_group
+                            ]
+                        ),
+                        crime_group
                     ]
                     for crime_group in percentage_data.index
                 ],
                 hovertemplate=(
-                    "<b>%{y}</b><br>"
+                    "<b>%{customdata[2]}</b><br>"
                     f"Outcome: {outcome}<br>"
-                    "Share: %{x:.1f}%<br>"
-                    "Incidents: %{customdata[0]:,}<br>"
+                    "Share within crime group: %{x:.1f}%<br>"
+                    "Distinct incidents: %{customdata[0]:,}<br>"
                     "Crime-group total: %{customdata[1]:,}"
                     "<extra></extra>"
                 )
@@ -846,9 +995,9 @@ def create_crime_outcome_composition_chart(data):
         barmode="stack",
         height=OUTCOME_COMPOSITION_CHART_HEIGHT,
         margin={
-            "l": 175,
+            "l": 220,
             "r": 30,
-            "t": 85,
+            "t": 90,
             "b": 60
         },
         paper_bgcolor="#0B111C",
@@ -865,10 +1014,7 @@ def create_crime_outcome_composition_chart(data):
             "font": {
                 "size": 10,
                 "color": "#E2E8F0"
-            },
-            "bgcolor": "rgba(11, 17, 28, 0.65)",
-            "bordercolor": "rgba(148, 163, 184, 0.22)",
-            "borderwidth": 1
+            }
         },
         xaxis={
             "title": {
@@ -881,120 +1027,123 @@ def create_crime_outcome_composition_chart(data):
             "ticksuffix": "%",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
                 "text": ""
             },
             "showgrid": False,
-            "automargin": True,
-            "tickfont": {
-                "size": 10,
-                "color": "#CBD5E1"
-            }
+            "automargin": True
         }
     )
 
     return figure
 
 
-def get_dominant_outcome_by_crime_group(data):
+def get_major_outcome_count(
+    outcome_data,
+    outcome
+):
     """
-    Return the crime group with the highest share for each major
-    outcome category when available.
+    Return one major outcome count.
     """
-    composition = prepare_crime_outcome_composition(
-        data
-    )
-
-    percentage_data = composition[
-        "percentage_data"
+    matching_rows = outcome_data[
+        outcome_data["disposition_group"]
+        == outcome
     ]
 
-    if percentage_data.empty:
-        return []
+    if matching_rows.empty:
+        return 0
 
-    findings = []
-
-    for outcome in get_ordered_outcome_columns(
-        percentage_data.columns.tolist()
-    ):
-        outcome_values = percentage_data[
-            outcome
+    return int(
+        matching_rows.iloc[
+            0
+        ][
+            "incident_count"
         ]
-
-        if outcome_values.empty:
-            continue
-
-        top_crime_group = outcome_values.idxmax()
-
-        findings.append(
-            {
-                "outcome": outcome,
-                "crime_group": top_crime_group,
-                "percentage": float(
-                    outcome_values.loc[
-                        top_crime_group
-                    ]
-                )
-            }
-        )
-
-    return findings
+    )
 
 
 def show_outcome_summary(data):
     """
-    Display compact case-resolution summary cards.
+    Display compact case outcome summary metrics.
     """
-    total_incidents = len(
+    total_incidents = distinct_incident_count(
         data
     )
 
-    arrest_count = safe_binary_sum(
-        data,
-        "is_arrest_related"
+    outcome_data = prepare_major_outcome_data(
+        data
     )
 
-    pending_count = safe_binary_sum(
-        data,
-        "is_pending"
+    closed_count = get_major_outcome_count(
+        outcome_data,
+        "Closed / Cleared"
     )
 
-    closed_count = safe_binary_sum(
-        data,
-        "is_closed"
+    pending_count = get_major_outcome_count(
+        outcome_data,
+        "Pending / Active"
     )
 
-    arrest_percentage = calculate_percentage(
-        arrest_count,
-        total_incidents
+    arrest_count = get_major_outcome_count(
+        outcome_data,
+        "Arrest-Related"
     )
 
-    pending_percentage = calculate_percentage(
-        pending_count,
-        total_incidents
-    )
-
-    closed_percentage = calculate_percentage(
+    closed_percentage = safe_percentage(
         closed_count,
         total_incidents
     )
 
-    top_disposition, disposition_count = get_top_value(
-        data,
-        "disposition_group"
+    pending_percentage = safe_percentage(
+        pending_count,
+        total_incidents
     )
 
-    top_detailed_disposition, detailed_count = get_top_value(
-        data,
-        "disposition"
+    arrest_percentage = safe_percentage(
+        arrest_count,
+        total_incidents
     )
+
+    top_outcome_group = "N/A"
+    top_outcome_count = 0
+
+    if not outcome_data.empty:
+        top_row = outcome_data.sort_values(
+            "incident_count",
+            ascending=False
+        ).iloc[
+            0
+        ]
+
+        top_outcome_group = top_row[
+            "disposition_group"
+        ]
+
+        top_outcome_count = int(
+            top_row[
+                "incident_count"
+            ]
+        )
+
+    detail_column = get_detail_disposition_column(
+        data
+    )
+
+    if detail_column:
+        (
+            top_detailed_disposition,
+            detailed_count
+        ) = get_top_value(
+            data,
+            detail_column
+        )
+
+    else:
+        top_detailed_disposition = "N/A"
+        detailed_count = 0
 
     overview_items = [
         {
@@ -1002,39 +1151,49 @@ def show_outcome_summary(data):
             "value": format_number(
                 total_incidents
             ),
-            "meta": "Current filtered view",
-            "numeric": True
+            "meta": "Distinct filtered incidents",
+            "numeric": True,
+            "metric_key": "selected_incidents"
         },
         {
             "label": "Closed / Cleared",
             "value": format_percentage(
                 closed_percentage
             ),
-            "meta": f"{format_number(closed_count)} records",
-            "numeric": True
+            "meta": (
+                f"{format_number(closed_count)} incidents"
+            ),
+            "numeric": True,
+            "metric_key": "closed_share"
         },
         {
             "label": "Pending / Active",
             "value": format_percentage(
                 pending_percentage
             ),
-            "meta": f"{format_number(pending_count)} records",
-            "numeric": True
+            "meta": (
+                f"{format_number(pending_count)} incidents"
+            ),
+            "numeric": True,
+            "metric_key": "pending_share"
         },
         {
-            "label": "Arrest-Related",
+            "label": "Arrest-Related Outcome",
             "value": format_percentage(
                 arrest_percentage
             ),
-            "meta": f"{format_number(arrest_count)} records",
-            "numeric": True
+            "meta": (
+                f"{format_number(arrest_count)} incidents"
+            ),
+            "numeric": True,
+            "metric_key": "arrest_related_share"
         },
         {
             "label": "Top Outcome Group",
-            "value": top_disposition,
+            "value": top_outcome_group,
             "meta": "Leading major outcome",
             "badge": format_number(
-                disposition_count
+                top_outcome_count
             )
         },
         {
@@ -1043,10 +1202,10 @@ def show_outcome_summary(data):
                 top_detailed_disposition,
                 maximum_length=30
             ),
-            "meta": "Leading detailed value",
+            "meta": "Source disposition value",
             "badge": format_number(
                 detailed_count
-            )
+            ),
         }
     ]
 
@@ -1058,29 +1217,33 @@ def show_outcome_summary(data):
         f"{format_percentage(closed_percentage)} of selected incidents "
         f"are closed or cleared, "
         f"{format_percentage(pending_percentage)} are pending or active, "
-        f"and {format_percentage(arrest_percentage)} are arrest-related."
+        f"and {format_percentage(arrest_percentage)} have an "
+        f"arrest-related outcome classification."
     )
 
     show_info_hint(
-        "Disposition terminology",
+        "Methodology",
         (
-            "Detailed dispositions may contain source-specific codes "
-            "or abbreviations. Interpret them using the official UMPD "
-            "source definitions or project data dictionary."
+        "Outcome percentages use distinct selected incidents. "
+        "Arrest-related outcome comes from the incident disposition field, "
+        "while arrest match coverage is calculated by linking incident and "
+        "arrest records. Source abbreviations such as CBE are retained "
+        "without interpretation unless officially confirmed."
         )
     )
 
     return {
-        "top_disposition": top_disposition,
-        "disposition_count": disposition_count,
+        "total_incidents": total_incidents,
+        "top_outcome_group": top_outcome_group,
+        "top_outcome_count": top_outcome_count,
         "top_detailed_disposition": top_detailed_disposition,
         "detailed_count": detailed_count,
-        "arrest_count": arrest_count,
-        "pending_count": pending_count,
         "closed_count": closed_count,
-        "arrest_percentage": arrest_percentage,
+        "pending_count": pending_count,
+        "arrest_count": arrest_count,
+        "closed_percentage": closed_percentage,
         "pending_percentage": pending_percentage,
-        "closed_percentage": closed_percentage
+        "arrest_percentage": arrest_percentage
     }
 
 
@@ -1089,13 +1252,13 @@ def show_outcome_volume_charts(
     summary
 ):
     """
-    Display major and detailed outcome volume charts.
+    Display major and detailed disposition charts.
     """
-    major_outcome_chart = create_major_outcome_chart(
+    major_chart = create_major_outcome_chart(
         data
     )
 
-    detailed_outcome_chart = create_detailed_disposition_chart(
+    detailed_chart = create_detailed_disposition_chart(
         data
     )
 
@@ -1106,24 +1269,18 @@ def show_outcome_volume_charts(
 
     with chart_left:
         st.plotly_chart(
-            major_outcome_chart,
+            major_chart,
             use_container_width=True,
             key="outcomes_major_outcome_chart",
-            config={
-                "displaylogo": False,
-                "responsive": True
-            }
+            config=get_chart_config()
         )
 
     with chart_right:
         st.plotly_chart(
-            detailed_outcome_chart,
+            detailed_chart,
             use_container_width=True,
             key="outcomes_detailed_disposition_chart",
-            config={
-                "displaylogo": False,
-                "responsive": True
-            }
+            config=get_chart_config()
         )
 
     insight_left, insight_right = st.columns(
@@ -1133,23 +1290,125 @@ def show_outcome_volume_charts(
 
     with insight_left:
         show_insight(
-            f"{summary['top_disposition']} is the leading major "
-            f"outcome category with "
-            f"{format_number(summary['disposition_count'])} records."
+            f"{summary['top_outcome_group']} is the leading major outcome "
+            f"with {format_number(summary['top_outcome_count'])} distinct "
+            f"incidents."
         )
 
     with insight_right:
         show_insight(
-            f"{summary['top_detailed_disposition']} is the most "
-            f"common detailed disposition with "
+            f"{summary['top_detailed_disposition']} is the most common "
+            f"detailed source disposition with "
             f"{format_number(summary['detailed_count'])} records."
         )
 
 
+def get_strongest_outcome_concentration(data):
+    """
+    Return the highest eligible crime-group outcome concentration.
+    """
+    composition = prepare_crime_outcome_composition(
+        data
+    )
+
+    percentage_data = composition[
+        "percentage_data"
+    ]
+
+    count_data = composition[
+        "count_data"
+    ]
+
+    crime_totals = composition[
+        "crime_totals"
+    ]
+
+    if percentage_data.empty:
+        return {
+            "crime_group": "N/A",
+            "outcome": "N/A",
+            "percentage": 0.0,
+            "count": 0,
+            "crime_total": 0
+        }
+
+    stacked_data = (
+        percentage_data
+        .stack()
+        .reset_index()
+    )
+
+    stacked_data.columns = [
+        "crime_group",
+        "outcome",
+        "percentage"
+    ]
+
+    strongest_row = stacked_data.sort_values(
+        [
+            "percentage",
+            "crime_group"
+        ],
+        ascending=[
+            False,
+            True
+        ]
+    ).iloc[
+        0
+    ]
+
+    crime_group = strongest_row[
+        "crime_group"
+    ]
+
+    outcome = strongest_row[
+        "outcome"
+    ]
+
+    return {
+        "crime_group": crime_group,
+        "outcome": outcome,
+        "percentage": float(
+            strongest_row[
+                "percentage"
+            ]
+        ),
+        "count": int(
+            count_data.loc[
+                crime_group,
+                outcome
+            ]
+        ),
+        "crime_total": int(
+            crime_totals.loc[
+                crime_group
+            ]
+        )
+    }
+
+
 def show_outcome_composition_chart(data):
     """
-    Display normalized outcome composition across crime groups.
+    Display normalized outcome composition across eligible crime groups.
     """
+    show_info_hint(
+        "Normalized composition",
+        (
+            "Each crime-group bar totals 100% of all distinct incidents in "
+            "that crime group. Every segment shows the share assigned to the "
+            "corresponding outcome category."
+        )
+    )
+
+    # show_info_hint(
+    #     "Minimum sample threshold",
+    #     (
+    #         f"Only crime groups with at least "
+    #         f"{MINIMUM_CRIME_GROUP_RECORDS} distinct selected incidents are "
+    #         "displayed. The group total is shown beside each chart label."
+    #     )
+    # )
+
     composition_chart = create_crime_outcome_composition_chart(
         data
     )
@@ -1158,50 +1417,42 @@ def show_outcome_composition_chart(data):
         composition_chart,
         use_container_width=True,
         key="outcomes_crime_group_composition_chart",
-        config={
-            "displaylogo": False,
-            "responsive": True
-        }
+        config=get_chart_config()
     )
 
-    findings = get_dominant_outcome_by_crime_group(
+    strongest = get_strongest_outcome_concentration(
         data
     )
 
-    if not findings:
+    if strongest[
+        "crime_group"
+    ] == "N/A":
         show_insight(
-            "Crime-group outcome composition is unavailable for the "
-            "current filtered selection."
+            "No crime groups meet the minimum sample threshold for "
+            "outcome-composition analysis."
         )
 
         return
 
-    leading_finding = max(
-        findings,
-        key=lambda item: item[
-            "percentage"
-        ]
-    )
-
     show_insight(
-        f"{leading_finding['crime_group']} has the strongest observed "
-        f"concentration in the "
-        f"{leading_finding['outcome']} outcome category, where it "
-        f"represents {leading_finding['percentage']:.1f}% of that "
-        f"crime group's selected incidents."
+        f"{strongest['crime_group']} has the highest displayed outcome "
+        f"concentration: {format_percentage(strongest['percentage'])} "
+        f"are classified as {strongest['outcome']}, based on "
+        f"{format_number(strongest['count'])} of "
+        f"{format_number(strongest['crime_total'])} distinct incidents."
     )
 
 
 def show_incident_outcomes(data):
     """
-    Display the complete case-resolution section.
+    Display the complete case outcome section.
     """
     show_section_banner(
         eyebrow="Resolution Intelligence",
         title="Case Resolution Profile",
         description=(
-            "Compare major and detailed dispositions, then examine how "
-            "outcome composition differs across high-volume crime groups."
+            "Compare major and detailed dispositions, then examine outcome "
+            "composition across sufficiently large crime groups."
         )
     )
 
@@ -1209,7 +1460,7 @@ def show_incident_outcomes(data):
         data
     )
 
-    st.divider()
+    # st.divider()
 
     show_outcome_volume_charts(
         data,

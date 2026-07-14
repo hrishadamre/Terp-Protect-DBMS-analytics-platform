@@ -7,10 +7,11 @@ dashboard.
 
 Responsibilities:
 - Summarize the current filtered incident view
-- Compare monthly incident activity across years
+- Compare monthly incident volume across source years
 - Display the leading crime groups
 - Present compact operational composition indicators
 - Avoid repeating detailed charts available in dedicated tabs
+- Avoid treating missing month-year data as zero incidents
 """
 
 import pandas as pd
@@ -47,12 +48,13 @@ MONTH_ORDER = [
 ]
 
 
-MONTH_NUMBER_ORDER = list(
-    range(
-        1,
-        13
+MONTH_NUMBER_TO_NAME = {
+    month_number: month_name
+    for month_number, month_name in enumerate(
+        MONTH_ORDER,
+        start=1
     )
-)
+}
 
 
 TOP_CRIME_GROUPS = 10
@@ -80,7 +82,7 @@ OUTCOME_COLORS = {
 
 
 DELAY_COLORS = {
-    "Same Day / Within 24 Hours": "#6AC7B6",
+    "Reported Within 24 Hours": "#6AC7B6",
     "1-3 Days": "#F2CC68",
     "4-7 Days": "#E9A85D",
     "Over 7 Days": "#D95F65",
@@ -88,19 +90,33 @@ DELAY_COLORS = {
 }
 
 
-def calculate_percentage(
-    count,
-    total
+def safe_percentage(
+    numerator,
+    denominator
 ):
     """
-    Calculate a safe percentage.
+    Calculate a percentage safely.
     """
-    if total <= 0:
+    numeric_numerator = pd.to_numeric(
+        numerator,
+        errors="coerce"
+    )
+
+    numeric_denominator = pd.to_numeric(
+        denominator,
+        errors="coerce"
+    )
+
+    if (
+        pd.isna(numeric_numerator)
+        or pd.isna(numeric_denominator)
+        or numeric_denominator <= 0
+    ):
         return 0.0
 
-    return (
-        count
-        / total
+    return float(
+        numeric_numerator
+        / numeric_denominator
         * 100
     )
 
@@ -126,7 +142,7 @@ def distinct_incident_count(data):
 
 def clean_category_value(value):
     """
-    Return a cleaned category value.
+    Return a cleaned categorical value.
     """
     if pd.isna(value):
         return "Unknown"
@@ -141,206 +157,82 @@ def clean_category_value(value):
     return cleaned_value
 
 
-def safe_binary_sum(
-    data,
-    column
-):
+def get_source_year_column(data):
     """
-    Safely sum a binary indicator column.
+    Return the year column used for the Command Center comparison.
+
+    source_year is intentionally preferred because it represents the
+    published UMPD log year and matches the dashboard's global Year filter.
+
+    occurred_year is only used as a fallback when source_year is absent.
     """
-    if (
-        data is None
-        or data.empty
-        or column not in data.columns
-    ):
-        return 0
+    if "source_year" in data.columns:
+        return "source_year"
 
-    values = pd.to_numeric(
-        data[column],
-        errors="coerce"
-    ).fillna(0)
+    if "occurred_year" in data.columns:
+        return "occurred_year"
 
-    return int(
-        values.sum()
-    )
+    if "year" in data.columns:
+        return "year"
+
+    return None
 
 
-def get_valid_delay_count(data):
+def get_month_number(data):
     """
-    Return the number of records with a valid non-negative delay.
+    Return a numeric occurrence-month series.
     """
-    if (
-        data is None
-        or data.empty
-        or "report_delay_hours" not in data.columns
-    ):
-        return 0
-
-    delay_values = pd.to_numeric(
-        data["report_delay_hours"],
-        errors="coerce"
-    )
-
-    valid_mask = (
-        delay_values.notna()
-        & (
-            delay_values >= 0
-        )
-    )
-
-    if "has_valid_reporting_delay" in data.columns:
-        valid_flag = pd.to_numeric(
-            data["has_valid_reporting_delay"],
+    if "occurred_month" in data.columns:
+        return pd.to_numeric(
+            data["occurred_month"],
             errors="coerce"
-        ).fillna(0)
+        )
 
-        valid_mask = (
-            valid_mask
-            & (
-                valid_flag == 1
+    if "occurred_month_name" in data.columns:
+        month_lookup = {
+            month_name: month_number
+            for month_number, month_name in enumerate(
+                MONTH_ORDER,
+                start=1
+            )
+        }
+
+        return (
+            data["occurred_month_name"]
+            .map(
+                month_lookup
             )
         )
 
-    return int(
-        valid_mask.sum()
-    )
-
-
-def calculate_median_delay_hours(data):
-    """
-    Calculate the median valid reporting delay.
-    """
-    if (
-        data is None
-        or data.empty
-        or "report_delay_hours" not in data.columns
-    ):
-        return pd.NA
-
-    delay_values = pd.to_numeric(
-        data["report_delay_hours"],
-        errors="coerce"
-    )
-
-    delay_values = delay_values[
-        delay_values.notna()
-        & (
-            delay_values >= 0
-        )
-    ]
-
-    if delay_values.empty:
-        return pd.NA
-
-    return float(
-        delay_values.median()
-    )
-
-
-def format_delay(hours):
-    """
-    Format a delay value as hours or days.
-    """
-    numeric_hours = pd.to_numeric(
-        hours,
-        errors="coerce"
-    )
-
-    if pd.isna(numeric_hours):
-        return "N/A"
-
-    numeric_hours = float(
-        numeric_hours
-    )
-
-    if numeric_hours < 48:
-        return f"{numeric_hours:.1f} hrs"
-
-    return f"{numeric_hours / 24:.1f} days"
-
-
-def calculate_weekend_percentage(data):
-    """
-    Calculate weekend incident share.
-    """
-    if data is None or data.empty:
-        return 0.0
-
-    if "occurred_is_weekend" in data.columns:
-        weekend_values = pd.to_numeric(
-            data["occurred_is_weekend"],
+    if "occurred_datetime" in data.columns:
+        occurred_datetime = pd.to_datetime(
+            data["occurred_datetime"],
             errors="coerce"
-        ).fillna(0)
-
-        return float(
-            weekend_values.mean()
-            * 100
         )
 
-    if "occurred_weekday" in data.columns:
-        weekend_count = data[
-            "occurred_weekday"
-        ].isin(
-            [
-                "Saturday",
-                "Sunday"
-            ]
-        ).sum()
+        return occurred_datetime.dt.month
 
-        return calculate_percentage(
-            weekend_count,
-            len(data)
-        )
-
-    return 0.0
+    return pd.Series(
+        pd.NA,
+        index=data.index,
+        dtype="Float64"
+    )
 
 
-def get_month_column(data):
+def prepare_monthly_source_year_data(data):
     """
-    Return the best available month-number column.
-    """
-    preferred_columns = [
-        "occurred_month",
-        "month",
-        "month_number"
-    ]
+    Prepare monthly incident counts by source year.
 
-    for column in preferred_columns:
-        if column in data.columns:
-            return column
-
-    return None
-
-
-def get_year_column(data):
-    """
-    Return the best available year column.
-    """
-    preferred_columns = [
-        "occurred_year",
-        "source_year",
-        "year"
-    ]
-
-    for column in preferred_columns:
-        if column in data.columns:
-            return column
-
-    return None
-
-
-def prepare_monthly_year_data(data):
-    """
-    Prepare monthly incident counts by year.
+    Important:
+    - source_year is used whenever available
+    - only observed month-year combinations are counted
+    - missing combinations are represented as gaps, not zero incidents
+    - distinct incident IDs are counted when available
     """
     if data is None or data.empty:
         return pd.DataFrame()
 
-    year_column = get_year_column(
-        data
-    )
-
-    month_column = get_month_column(
+    year_column = get_source_year_column(
         data
     )
 
@@ -349,49 +241,18 @@ def prepare_monthly_year_data(data):
 
     working_data = data.copy()
 
-    working_data["_year"] = pd.to_numeric(
+    working_data["_source_year"] = pd.to_numeric(
         working_data[year_column],
         errors="coerce"
     )
 
-    if month_column is not None:
-        working_data["_month_number"] = pd.to_numeric(
-            working_data[month_column],
-            errors="coerce"
-        )
-
-    elif "occurred_month_name" in working_data.columns:
-        month_mapping = {
-            month_name: month_number
-            for month_number, month_name in enumerate(
-                MONTH_ORDER,
-                start=1
-            )
-        }
-
-        working_data["_month_number"] = (
-            working_data["occurred_month_name"]
-            .map(
-                month_mapping
-            )
-        )
-
-    elif "occurred_datetime" in working_data.columns:
-        occurred_datetime = pd.to_datetime(
-            working_data["occurred_datetime"],
-            errors="coerce"
-        )
-
-        working_data["_month_number"] = (
-            occurred_datetime.dt.month
-        )
-
-    else:
-        return pd.DataFrame()
+    working_data["_month_number"] = get_month_number(
+        working_data
+    )
 
     working_data = working_data.dropna(
         subset=[
-            "_year",
+            "_source_year",
             "_month_number"
         ]
     )
@@ -401,13 +262,13 @@ def prepare_monthly_year_data(data):
             1,
             12
         )
-    ]
+    ].copy()
 
     if working_data.empty:
         return pd.DataFrame()
 
-    working_data["_year"] = (
-        working_data["_year"]
+    working_data["_source_year"] = (
+        working_data["_source_year"]
         .astype(int)
     )
 
@@ -421,7 +282,7 @@ def prepare_monthly_year_data(data):
             working_data
             .groupby(
                 [
-                    "_year",
+                    "_source_year",
                     "_month_number"
                 ]
             )["incident_id"]
@@ -436,7 +297,7 @@ def prepare_monthly_year_data(data):
             working_data
             .groupby(
                 [
-                    "_year",
+                    "_source_year",
                     "_month_number"
                 ]
             )
@@ -446,56 +307,73 @@ def prepare_monthly_year_data(data):
             )
         )
 
-    complete_index = pd.MultiIndex.from_product(
+    monthly_summary["month_name"] = (
+        monthly_summary["_month_number"]
+        .map(
+            MONTH_NUMBER_TO_NAME
+        )
+    )
+
+    return monthly_summary.sort_values(
         [
-            sorted(
-                monthly_summary["_year"]
-                .unique()
-            ),
-            MONTH_NUMBER_ORDER
-        ],
-        names=[
-            "_year",
+            "_source_year",
             "_month_number"
         ]
     )
 
-    monthly_summary = (
-        monthly_summary
-        .set_index(
-            [
-                "_year",
-                "_month_number"
-            ]
-        )
-        .reindex(
-            complete_index,
-            fill_value=0
-        )
-        .reset_index()
+
+def prepare_source_year_plot_data(
+    monthly_data,
+    source_year
+):
+    """
+    Prepare one complete 12-month plotting frame for a source year.
+
+    Missing months are assigned None so Plotly displays a gap instead
+    of an artificial zero value.
+    """
+    full_month_frame = pd.DataFrame(
+        {
+            "_month_number": range(
+                1,
+                13
+            ),
+            "month_name": MONTH_ORDER
+        }
     )
 
-    monthly_summary["month_name"] = (
-        monthly_summary["_month_number"]
-        .map(
-            {
-                month_number: month_name
-                for month_number, month_name in enumerate(
-                    MONTH_ORDER,
-                    start=1
-                )
-            }
+    year_data = monthly_data[
+        monthly_data["_source_year"]
+        == source_year
+    ][
+        [
+            "_month_number",
+            "incident_count"
+        ]
+    ].copy()
+
+    plot_data = full_month_frame.merge(
+        year_data,
+        on="_month_number",
+        how="left"
+    )
+
+    plot_data["incident_count"] = (
+        plot_data["incident_count"]
+        .where(
+            plot_data["incident_count"].notna(),
+            None
         )
     )
 
-    return monthly_summary
+    return plot_data
 
 
-def create_monthly_year_chart(data):
+def create_monthly_source_year_chart(data):
     """
-    Create a monthly incident trend with one line per year.
+    Create the monthly incident comparison by source year.
     """
-    monthly_data = prepare_monthly_year_data(
+    monthly_data = prepare_monthly_source_year_data(
         data
     )
 
@@ -503,7 +381,7 @@ def create_monthly_year_chart(data):
 
     if monthly_data.empty:
         figure.add_annotation(
-            text="Monthly year-comparison data is unavailable.",
+            text="Monthly source-year data is unavailable.",
             x=0.5,
             y=0.5,
             xref="paper",
@@ -516,7 +394,7 @@ def create_monthly_year_chart(data):
         )
 
         figure.update_layout(
-            title="Monthly Incident Trend by Year",
+            title="Monthly Incident Volume by Source Year",
             height=PRIMARY_CHART_HEIGHT,
             paper_bgcolor="#0B111C",
             plot_bgcolor="#0B111C"
@@ -525,18 +403,17 @@ def create_monthly_year_chart(data):
         return figure
 
     available_years = sorted(
-        monthly_data["_year"]
-        .unique()
+        monthly_data["_source_year"]
+        .drop_duplicates()
+        .tolist()
     )
 
-    for index, year in enumerate(
+    for index, source_year in enumerate(
         available_years
     ):
-        year_data = monthly_data[
-            monthly_data["_year"]
-            == year
-        ].sort_values(
-            "_month_number"
+        year_data = prepare_source_year_plot_data(
+            monthly_data=monthly_data,
+            source_year=source_year
         )
 
         figure.add_trace(
@@ -549,8 +426,9 @@ def create_monthly_year_chart(data):
                 ],
                 mode="lines+markers",
                 name=str(
-                    year
+                    source_year
                 ),
+                connectgaps=False,
                 line={
                     "width": 2.6,
                     "color": YEAR_COLORS[
@@ -564,7 +442,7 @@ def create_monthly_year_chart(data):
                     "size": 7
                 },
                 hovertemplate=(
-                    f"<b>{year}</b><br>"
+                    f"<b>Source year {source_year}</b><br>"
                     "Month: %{x}<br>"
                     "Incidents: %{y:,}"
                     "<extra></extra>"
@@ -574,7 +452,7 @@ def create_monthly_year_chart(data):
 
     figure.update_layout(
         title={
-            "text": "Monthly Incident Trend by Year",
+            "text": "Monthly Incident Volume by Source Year",
             "x": 0,
             "xanchor": "left",
             "font": {
@@ -595,6 +473,13 @@ def create_monthly_year_chart(data):
             "color": "#F8FAFC"
         },
         legend={
+            "title": {
+                "text": "Source Year",
+                "font": {
+                    "size": 11,
+                    "color": "#CBD5E1"
+                }
+            },
             "orientation": "h",
             "yanchor": "bottom",
             "y": 1.02,
@@ -607,7 +492,7 @@ def create_monthly_year_chart(data):
         },
         xaxis={
             "title": {
-                "text": "Month"
+                "text": "Occurrence Month"
             },
             "categoryorder": "array",
             "categoryarray": MONTH_ORDER,
@@ -641,7 +526,7 @@ def create_monthly_year_chart(data):
 
 def prepare_crime_group_data(data):
     """
-    Prepare top crime-group counts.
+    Prepare the leading crime-group counts.
     """
     if (
         data is None
@@ -650,10 +535,17 @@ def prepare_crime_group_data(data):
     ):
         return pd.DataFrame()
 
+    selected_columns = [
+        "crime_group"
+    ]
+
+    if "incident_id" in data.columns:
+        selected_columns.append(
+            "incident_id"
+        )
+
     working_data = data[
-        [
-            "crime_group"
-        ]
+        selected_columns
     ].copy()
 
     working_data["crime_group"] = (
@@ -663,11 +555,7 @@ def prepare_crime_group_data(data):
         )
     )
 
-    if "incident_id" in data.columns:
-        working_data["incident_id"] = data[
-            "incident_id"
-        ]
-
+    if "incident_id" in working_data.columns:
         summary = (
             working_data
             .groupby(
@@ -695,12 +583,13 @@ def prepare_crime_group_data(data):
         "incident_count"
     ].sum()
 
-    summary["percentage"] = (
-        summary["incident_count"]
-        / total_incidents
-        * 100
-        if total_incidents > 0
-        else 0.0
+    summary["percentage"] = summary[
+        "incident_count"
+    ].apply(
+        lambda count: safe_percentage(
+            count,
+            total_incidents
+        )
     )
 
     return (
@@ -783,7 +672,7 @@ def create_top_crime_group_chart(data):
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Incidents: %{x:,}<br>"
-                "Share: %{customdata[0]:.1f}%"
+                "Share of selected incidents: %{customdata[0]:.1f}%"
                 "<extra></extra>"
             )
         )
@@ -843,7 +732,7 @@ def create_top_crime_group_chart(data):
 
 def normalize_outcome_label(value):
     """
-    Convert a source outcome label into a compact operational category.
+    Convert a source outcome value into a compact operational category.
     """
     normalized_value = clean_category_value(
         value
@@ -877,92 +766,81 @@ def normalize_outcome_label(value):
 
 def prepare_outcome_composition(data):
     """
-    Prepare major outcome composition.
+    Prepare major case-outcome composition.
     """
+    outcome_order = [
+        "Closed / Cleared",
+        "Pending / Active",
+        "Arrest-Related",
+        "Other"
+    ]
+
     if data is None or data.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            {
+                "category": outcome_order,
+                "count": [
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "percentage": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ]
+            }
+        )
 
     if "disposition_group" in data.columns:
-        outcome_values = (
-            data["disposition_group"]
+        working_data = data.copy()
+
+        working_data["_outcome_category"] = (
+            working_data["disposition_group"]
             .apply(
                 normalize_outcome_label
             )
         )
 
+        if "incident_id" in working_data.columns:
+            counts = (
+                working_data
+                .groupby(
+                    "_outcome_category"
+                )["incident_id"]
+                .nunique()
+                .reindex(
+                    outcome_order,
+                    fill_value=0
+                )
+            )
+
+        else:
+            counts = (
+                working_data[
+                    "_outcome_category"
+                ]
+                .value_counts()
+                .reindex(
+                    outcome_order,
+                    fill_value=0
+                )
+            )
+
     else:
-        outcome_values = pd.Series(
-            "Other",
-            index=data.index
-        )
-
-        closed_mask = pd.Series(
-            False,
-            index=data.index
-        )
-
-        pending_mask = pd.Series(
-            False,
-            index=data.index
-        )
-
-        arrest_mask = pd.Series(
-            False,
-            index=data.index
-        )
-
-        if "is_closed" in data.columns:
-            closed_mask = (
-                pd.to_numeric(
-                    data["is_closed"],
-                    errors="coerce"
-                ).fillna(0)
-                == 1
-            )
-
-        if "is_pending" in data.columns:
-            pending_mask = (
-                pd.to_numeric(
-                    data["is_pending"],
-                    errors="coerce"
-                ).fillna(0)
-                == 1
-            )
-
-        if "is_arrest_related" in data.columns:
-            arrest_mask = (
-                pd.to_numeric(
-                    data["is_arrest_related"],
-                    errors="coerce"
-                ).fillna(0)
-                == 1
-            )
-
-        outcome_values.loc[
-            closed_mask
-        ] = "Closed / Cleared"
-
-        outcome_values.loc[
-            pending_mask
-        ] = "Pending / Active"
-
-        outcome_values.loc[
-            arrest_mask
-        ] = "Arrest-Related"
-
-    counts = (
-        outcome_values
-        .value_counts()
-        .reindex(
+        counts = pd.Series(
             [
-                "Closed / Cleared",
-                "Pending / Active",
-                "Arrest-Related",
-                "Other"
+                0,
+                0,
+                0,
+                distinct_incident_count(
+                    data
+                )
             ],
-            fill_value=0
+            index=outcome_order
         )
-    )
 
     total = int(
         counts.sum()
@@ -977,51 +855,84 @@ def prepare_outcome_composition(data):
         "count"
     ]
 
-    summary["percentage"] = (
-        summary["count"]
-        / total
-        * 100
-        if total > 0
-        else 0.0
+    summary["percentage"] = summary[
+        "count"
+    ].apply(
+        lambda count: safe_percentage(
+            count,
+            total
+        )
     )
 
     return summary
 
 
+def normalize_delay_bucket(value):
+    """
+    Standardize delay-bucket wording for the Command Center.
+    """
+    cleaned_value = clean_category_value(
+        value
+    )
+
+    lower_value = cleaned_value.lower()
+
+    if (
+        "same day" in lower_value
+        or "within 24" in lower_value
+    ):
+        return "Reported Within 24 Hours"
+
+    if (
+        "1-3" in lower_value
+        or "1 - 3" in lower_value
+    ):
+        return "1-3 Days"
+
+    if (
+        "4-7" in lower_value
+        or "4 - 7" in lower_value
+    ):
+        return "4-7 Days"
+
+    if (
+        "over 7" in lower_value
+        or "more than 7" in lower_value
+    ):
+        return "Over 7 Days"
+
+    return "Unknown"
+
+
 def prepare_delay_composition(data):
     """
-    Prepare reporting-delay bucket composition.
+    Prepare reporting-delay composition.
     """
     delay_order = [
-        "Same Day / Within 24 Hours",
+        "Reported Within 24 Hours",
         "1-3 Days",
         "4-7 Days",
         "Over 7 Days",
         "Unknown"
     ]
 
-    if (
-        data is None
-        or data.empty
-        or "delay_bucket" not in data.columns
-    ):
+    if data is None or data.empty:
         counts = pd.Series(
-            [0] * len(
-                delay_order
-            ),
+            [
+                0,
+                0,
+                0,
+                0,
+                0
+            ],
             index=delay_order
         )
 
-    else:
+    elif "delay_bucket" in data.columns:
         delay_values = (
             data["delay_bucket"]
-            .fillna("Unknown")
-            .astype(str)
-            .str.strip()
-            .replace(
-                {
-                    "": "Unknown"
-                }
+            .apply(
+                normalize_delay_bucket
             )
         )
 
@@ -1034,6 +945,73 @@ def prepare_delay_composition(data):
             )
         )
 
+    elif "report_delay_hours" in data.columns:
+        delay_hours = pd.to_numeric(
+            data["report_delay_hours"],
+            errors="coerce"
+        )
+
+        delay_values = pd.Series(
+            "Unknown",
+            index=data.index,
+            dtype="object"
+        )
+
+        delay_values.loc[
+            delay_hours.notna()
+            & (
+                delay_hours >= 0
+            )
+            & (
+                delay_hours <= 24
+            )
+        ] = "Reported Within 24 Hours"
+
+        delay_values.loc[
+            (
+                delay_hours > 24
+            )
+            & (
+                delay_hours <= 72
+            )
+        ] = "1-3 Days"
+
+        delay_values.loc[
+            (
+                delay_hours > 72
+            )
+            & (
+                delay_hours <= 168
+            )
+        ] = "4-7 Days"
+
+        delay_values.loc[
+            delay_hours > 168
+        ] = "Over 7 Days"
+
+        counts = (
+            delay_values
+            .value_counts()
+            .reindex(
+                delay_order,
+                fill_value=0
+            )
+        )
+
+    else:
+        counts = pd.Series(
+            [
+                0,
+                0,
+                0,
+                0,
+                distinct_incident_count(
+                    data
+                )
+            ],
+            index=delay_order
+        )
+
     total = int(
         counts.sum()
     )
@@ -1047,12 +1025,13 @@ def prepare_delay_composition(data):
         "count"
     ]
 
-    summary["percentage"] = (
-        summary["count"]
-        / total
-        * 100
-        if total > 0
-        else 0.0
+    summary["percentage"] = summary[
+        "count"
+    ].apply(
+        lambda count: safe_percentage(
+            count,
+            total
+        )
     )
 
     return summary
@@ -1062,22 +1041,59 @@ def prepare_weekpart_composition(data):
     """
     Prepare weekday-versus-weekend composition.
     """
-    total = len(
+    total_incidents = distinct_incident_count(
         data
     )
 
-    weekend_percentage = calculate_weekend_percentage(
-        data
-    )
+    if total_incidents <= 0:
+        return pd.DataFrame(
+            {
+                "category": [
+                    "Weekday",
+                    "Weekend"
+                ],
+                "count": [
+                    0,
+                    0
+                ],
+                "percentage": [
+                    0.0,
+                    0.0
+                ]
+            }
+        )
 
-    weekend_count = round(
-        total
-        * weekend_percentage
-        / 100
+    if "occurred_is_weekend" in data.columns:
+        weekend_flag = pd.to_numeric(
+            data["occurred_is_weekend"],
+            errors="coerce"
+        ).fillna(0)
+
+        weekend_data = data[
+            weekend_flag == 1
+        ]
+
+    elif "occurred_weekday" in data.columns:
+        weekend_data = data[
+            data["occurred_weekday"].isin(
+                [
+                    "Saturday",
+                    "Sunday"
+                ]
+            )
+        ]
+
+    else:
+        weekend_data = data.iloc[
+            0:0
+        ]
+
+    weekend_count = distinct_incident_count(
+        weekend_data
     )
 
     weekday_count = max(
-        total - weekend_count,
+        total_incidents - weekend_count,
         0
     )
 
@@ -1092,13 +1108,13 @@ def prepare_weekpart_composition(data):
                 weekend_count
             ],
             "percentage": [
-                calculate_percentage(
+                safe_percentage(
                     weekday_count,
-                    total
+                    total_incidents
                 ),
-                calculate_percentage(
+                safe_percentage(
                     weekend_count,
-                    total
+                    total_incidents
                 )
             ]
         }
@@ -1157,11 +1173,6 @@ def add_composition_row(
 def create_operational_composition_chart(data):
     """
     Create a compact operational composition chart.
-
-    Rows:
-    - Case outcomes
-    - Reporting timeliness
-    - Weekday versus weekend activity
     """
     outcome_data = prepare_outcome_composition(
         data
@@ -1235,11 +1246,7 @@ def create_operational_composition_chart(data):
             "ticksuffix": "%",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
@@ -1252,28 +1259,24 @@ def create_operational_composition_chart(data):
                 "Incident Timing"
             ],
             "autorange": "reversed",
-            "showgrid": False,
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "showgrid": False
         }
     )
 
     return figure
 
 
-def get_peak_month_year(data):
+def get_peak_source_year_month(data):
     """
-    Return the highest-volume month and year combination.
+    Return the highest observed source-year and month combination.
     """
-    monthly_data = prepare_monthly_year_data(
+    monthly_data = prepare_monthly_source_year_data(
         data
     )
 
     if monthly_data.empty:
         return {
-            "year": "N/A",
+            "source_year": "N/A",
             "month": "N/A",
             "count": 0
         }
@@ -1281,12 +1284,14 @@ def get_peak_month_year(data):
     top_row = monthly_data.sort_values(
         "incident_count",
         ascending=False
-    ).iloc[0]
+    ).iloc[
+        0
+    ]
 
     return {
-        "year": int(
+        "source_year": int(
             top_row[
-                "_year"
+                "_source_year"
             ]
         ),
         "month": top_row[
@@ -1300,50 +1305,107 @@ def get_peak_month_year(data):
     }
 
 
-def get_same_day_percentage(data):
+def get_composition_percentage(
+    composition_data,
+    category
+):
     """
-    Return the percentage of incidents in the same-day delay bucket.
+    Return one percentage from a composition dataframe.
     """
-    delay_data = prepare_delay_composition(
-        data
-    )
-
-    matching_rows = delay_data[
-        delay_data["category"]
-        == "Same Day / Within 24 Hours"
+    matching_rows = composition_data[
+        composition_data["category"]
+        == category
     ]
 
     if matching_rows.empty:
         return 0.0
 
     return float(
-        matching_rows.iloc[0][
+        matching_rows.iloc[
+            0
+        ][
             "percentage"
         ]
     )
 
 
-def get_closed_percentage(data):
+def calculate_valid_delay_statistics(data):
     """
-    Return the closed or cleared incident share.
+    Calculate median delay and valid-delay coverage.
     """
-    outcome_data = prepare_outcome_composition(
-        data
+    if (
+        data is None
+        or data.empty
+        or "report_delay_hours" not in data.columns
+    ):
+        return {
+            "median_delay": pd.NA,
+            "valid_count": 0,
+            "valid_coverage": 0.0
+        }
+
+    delay_values = pd.to_numeric(
+        data["report_delay_hours"],
+        errors="coerce"
     )
 
-    matching_rows = outcome_data[
-        outcome_data["category"]
-        == "Closed / Cleared"
+    valid_mask = (
+        delay_values.notna()
+        & (
+            delay_values >= 0
+        )
+    )
+
+    valid_values = delay_values[
+        valid_mask
     ]
 
-    if matching_rows.empty:
-        return 0.0
+    if valid_values.empty:
+        median_delay = pd.NA
 
-    return float(
-        matching_rows.iloc[0][
-            "percentage"
-        ]
+    else:
+        median_delay = float(
+            valid_values.median()
+        )
+
+    valid_count = int(
+        valid_mask.sum()
     )
+
+    return {
+        "median_delay": median_delay,
+        "valid_count": valid_count,
+        "valid_coverage": safe_percentage(
+            valid_count,
+            len(
+                data
+            )
+        )
+    }
+
+
+def format_delay(hours):
+    """
+    Format a reporting delay as hours or days.
+    """
+    numeric_hours = pd.to_numeric(
+        hours,
+        errors="coerce"
+    )
+
+    if pd.isna(
+        numeric_hours
+    ):
+        return "N/A"
+
+    numeric_hours = float(
+        numeric_hours
+    )
+
+    if numeric_hours < 48:
+        return f"{numeric_hours:.1f} hrs"
+
+    return f"{numeric_hours / 24:.1f} days"
 
 
 def show_command_summary(data):
@@ -1369,29 +1431,35 @@ def show_command_summary(data):
         "disposition_group"
     )
 
-    median_delay = calculate_median_delay_hours(
+    delay_statistics = calculate_valid_delay_statistics(
         data
     )
 
-    valid_delay_count = get_valid_delay_count(
+    outcome_composition = prepare_outcome_composition(
         data
     )
 
-    valid_delay_percentage = calculate_percentage(
-        valid_delay_count,
-        len(data)
-    )
-
-    same_day_percentage = get_same_day_percentage(
+    delay_composition = prepare_delay_composition(
         data
     )
 
-    closed_percentage = get_closed_percentage(
+    weekpart_composition = prepare_weekpart_composition(
         data
     )
 
-    weekend_percentage = calculate_weekend_percentage(
-        data
+    closed_percentage = get_composition_percentage(
+        outcome_composition,
+        "Closed / Cleared"
+    )
+
+    within_24_hour_percentage = get_composition_percentage(
+        delay_composition,
+        "Reported Within 24 Hours"
+    )
+
+    weekend_percentage = get_composition_percentage(
+        weekpart_composition,
+        "Weekend"
     )
 
     overview_items = [
@@ -1401,7 +1469,8 @@ def show_command_summary(data):
                 selected_incidents
             ),
             "meta": "Distinct filtered incidents",
-            "numeric": True
+            "numeric": True,
+            "metric_key": "selected_incidents"
         },
         {
             "label": "Top Crime Group",
@@ -1433,26 +1502,31 @@ def show_command_summary(data):
                 closed_percentage
             ),
             "meta": "Selected incident share",
-            "numeric": True
+            "numeric": True,
+            "metric_key": "closed_share"
         },
         {
-            "label": "Same-Day Reporting",
+            "label": "Reported Within 24 Hours",
             "value": format_percentage(
-                same_day_percentage
+                within_24_hour_percentage
             ),
-            "meta": "Within 24 hours",
-            "numeric": True
+            "meta": "Elapsed reporting time",
+            "numeric": True,
+            "metric_key": "same_day_share"
         },
         {
             "label": "Median Delay",
             "value": format_delay(
-                median_delay
+                delay_statistics[
+                    "median_delay"
+                ]
             ),
             "meta": (
-                f"{format_percentage(valid_delay_percentage)} "
+                f"{format_percentage(delay_statistics['valid_coverage'])} "
                 "valid coverage"
             ),
-            "numeric": True
+            "numeric": True,
+            "metric_key": "median_delay"
         },
         {
             "label": "Weekend Share",
@@ -1460,7 +1534,8 @@ def show_command_summary(data):
                 weekend_percentage
             ),
             "meta": "Saturday and Sunday",
-            "numeric": True
+            "numeric": True,
+            "metric_key": "weekend_share"
         }
     ]
 
@@ -1468,26 +1543,26 @@ def show_command_summary(data):
         overview_items
     )
 
-    peak_period = get_peak_month_year(
+    peak_period = get_peak_source_year_month(
         data
     )
 
     show_insight(
         f"{top_crime_group} is the leading crime group with "
         f"{format_number(top_crime_count)} incidents. "
-        f"The highest monthly point is {peak_period['month']} "
-        f"{peak_period['year']} with "
+        f"The highest observed source-year month is "
+        f"{peak_period['month']} {peak_period['source_year']} with "
         f"{format_number(peak_period['count'])} incidents, while "
-        f"{format_percentage(same_day_percentage)} of selected records "
-        f"were reported within 24 hours."
+        f"{format_percentage(within_24_hour_percentage)} of selected "
+        f"records were reported within 24 hours."
     )
 
     show_info_hint(
         "Command Center scope",
         (
-            "This page provides an executive summary. Use the dedicated "
-            "tabs for detailed time, location, outcome, delay, arrest, "
-            "and data-quality analysis."
+            "The year comparison uses source_year, which represents the "
+            "UMPD log year and matches the dashboard Year filter. Occurrence "
+            "dates are still used for the month within each source year."
         )
     )
 
@@ -1499,8 +1574,10 @@ def show_command_summary(data):
         "top_location_count": top_location_count,
         "top_outcome_group": top_outcome_group,
         "top_outcome_count": top_outcome_count,
-        "median_delay": median_delay,
-        "same_day_percentage": same_day_percentage,
+        "median_delay": delay_statistics[
+            "median_delay"
+        ],
+        "within_24_hour_percentage": within_24_hour_percentage,
         "closed_percentage": closed_percentage,
         "weekend_percentage": weekend_percentage,
         "peak_period": peak_period
@@ -1514,7 +1591,7 @@ def show_primary_charts(
     """
     Display the two primary Command Center charts.
     """
-    monthly_chart = create_monthly_year_chart(
+    monthly_chart = create_monthly_source_year_chart(
         data
     )
 
@@ -1534,7 +1611,7 @@ def show_primary_charts(
         st.plotly_chart(
             monthly_chart,
             use_container_width=True,
-            key="command_monthly_year_chart",
+            key="command_monthly_source_year_chart",
             config=get_chart_config()
         )
 
@@ -1560,9 +1637,18 @@ def show_primary_charts(
         ]
 
         show_insight(
-            f"{peak_period['month']} {peak_period['year']} is the "
-            f"highest-volume month-year combination with "
+            f"{peak_period['month']} {peak_period['source_year']} is the "
+            f"highest observed source-year month with "
             f"{format_number(peak_period['count'])} incidents."
+        )
+
+        show_info_hint(
+            "Missing-month treatment",
+            (
+                "A missing month-year combination is displayed as a gap, "
+                "not as zero. Zero is only appropriate when the dataset "
+                "explicitly confirms that no incidents occurred."
+            )
         )
 
     with insight_right:
@@ -1577,7 +1663,7 @@ def show_operational_composition(
     summary
 ):
     """
-    Display the compact operational composition strip.
+    Display the compact operational composition chart.
     """
     composition_chart = create_operational_composition_chart(
         data
@@ -1593,7 +1679,7 @@ def show_operational_composition(
     show_insight(
         f"{format_percentage(summary['closed_percentage'])} of selected "
         f"incidents are closed or cleared, "
-        f"{format_percentage(summary['same_day_percentage'])} were "
+        f"{format_percentage(summary['within_24_hour_percentage'])} were "
         f"reported within 24 hours, and "
         f"{format_percentage(summary['weekend_percentage'])} occurred "
         f"on weekends."
@@ -1608,9 +1694,9 @@ def show_executive_overview(data):
         eyebrow="Executive Intelligence",
         title="Terp Protect Command Center",
         description=(
-            "Monitor incident volume, seasonal trends, leading crime "
-            "categories, and core operational composition for the "
-            "current filtered view."
+            "Monitor incident volume, source-year patterns, leading crime "
+            "categories, and core operational composition for the current "
+            "filtered view."
         )
     )
 
@@ -1618,7 +1704,7 @@ def show_executive_overview(data):
         data
     )
 
-    st.divider()
+    # st.divider()
 
     show_primary_charts(
         data,

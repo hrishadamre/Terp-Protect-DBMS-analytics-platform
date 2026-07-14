@@ -2,15 +2,15 @@
 data_quality.py
 
 Purpose:
-Display data-quality and validation diagnostics for the
-Terp Protect dashboard.
+Display the data reliability profile for the Terp Protect dashboard.
 
 Responsibilities:
-- Compare validity percentages across incident and arrest fields
-- Show valid and invalid record counts
-- Identify duplicates, missing values, and invalid delays
-- Present a compact quality-check table
-- Keep invalid-record review collapsed
+- Measure completeness and format validity for key fields
+- Calculate a weighted primary field-check pass rate
+- Display field-level validity percentages
+- Identify records that fail configured quality checks
+- Provide a compact record-review panel
+- Explain the limitations of automated quality checks
 """
 
 import pandas as pd
@@ -25,499 +25,560 @@ from components.layout import (
     show_insight,
     show_section_banner
 )
-from components.metrics import (
-    format_number,
-    format_percentage
-)
+from components.metrics import format_number
 
 
 QUALITY_CHART_HEIGHT = 500
 
-PASS_THRESHOLD = 99.5
-WARNING_THRESHOLD = 95.0
+
+INCIDENT_PRIMARY_CHECKS = [
+    {
+        "label": "Incident Case Number",
+        "column": "has_valid_case_number"
+    },
+    {
+        "label": "Incident Occurred Datetime",
+        "column": "has_valid_occurred_datetime"
+    },
+    {
+        "label": "Incident Reported Datetime",
+        "column": "has_valid_reported_datetime"
+    },
+    {
+        "label": "Incident Reporting Delay",
+        "column": "has_valid_reporting_delay"
+    }
+]
 
 
-def calculate_percentage(
-    count,
-    total
+ARREST_PRIMARY_CHECKS = [
+    {
+        "label": "Arrest Number",
+        "column": "has_valid_arrest_number"
+    },
+    {
+        "label": "Arrest Case Number",
+        "column": "has_valid_case_number"
+    },
+    {
+        "label": "Arrest Datetime",
+        "column": "has_valid_arrested_datetime"
+    },
+    {
+        "label": "Arrest Charge Text",
+        "column": "has_charge_text"
+    }
+]
+
+
+def safe_percentage(
+    numerator,
+    denominator
 ):
     """
-    Calculate a safe percentage.
+    Calculate a percentage safely.
     """
-    if total <= 0:
+    numeric_numerator = pd.to_numeric(
+        numerator,
+        errors="coerce"
+    )
+
+    numeric_denominator = pd.to_numeric(
+        denominator,
+        errors="coerce"
+    )
+
+    if (
+        pd.isna(numeric_numerator)
+        or pd.isna(numeric_denominator)
+        or numeric_denominator <= 0
+    ):
         return 0.0
 
-    return (
-        count
-        / total
+    return float(
+        numeric_numerator
+        / numeric_denominator
         * 100
     )
 
 
-def safe_distinct_count(
-    data,
-    column
+def format_precise_percentage(
+    value,
+    decimal_places=2
 ):
     """
-    Return the number of distinct non-null values in a column.
+    Format a percentage without hiding small failure rates.
     """
+    numeric_value = pd.to_numeric(
+        value,
+        errors="coerce"
+    )
+
+    if pd.isna(
+        numeric_value
+    ):
+        return "0.00%"
+
+    return (
+        f"{float(numeric_value):.{decimal_places}f}%"
+    )
+
+
+def get_distinct_data(
+    data,
+    candidate_identifiers
+):
+    """
+    Return one row per distinct record using the first available ID.
+
+    Rows with missing identifiers are retained because they may represent
+    records requiring quality review.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    working_data = data.copy()
+
+    for identifier in candidate_identifiers:
+        if identifier not in working_data.columns:
+            continue
+
+        non_null_data = (
+            working_data[
+                working_data[
+                    identifier
+                ].notna()
+            ]
+            .drop_duplicates(
+                subset=[
+                    identifier
+                ]
+            )
+        )
+
+        null_data = working_data[
+            working_data[
+                identifier
+            ].isna()
+        ]
+
+        return pd.concat(
+            [
+                non_null_data,
+                null_data
+            ],
+            ignore_index=True
+        )
+
+    return working_data.drop_duplicates()
+
+
+def get_distinct_incident_data(data):
+    """
+    Return one row per incident.
+    """
+    return get_distinct_data(
+        data,
+        [
+            "incident_id",
+            "case_number"
+        ]
+    )
+
+
+def get_distinct_arrest_data(data):
+    """
+    Return one row per arrest.
+    """
+    return get_distinct_data(
+        data,
+        [
+            "arrest_id",
+            "arrest_number"
+        ]
+    )
+
+
+def normalize_binary_flag(series):
+    """
+    Convert a quality flag into binary values.
+
+    A value equal to one passes the configured check.
+    All other values are treated as needing review.
+    """
+    numeric_values = pd.to_numeric(
+        series,
+        errors="coerce"
+    ).fillna(0)
+
+    return (
+        numeric_values == 1
+    ).astype(int)
+
+
+def calculate_check_result(
+    data,
+    label,
+    column,
+    record_type
+):
+    """
+    Calculate one primary field-check result.
+    """
+    if data is None:
+        total_records = 0
+    else:
+        total_records = len(
+            data
+        )
+
     if (
         data is None
         or data.empty
         or column not in data.columns
     ):
-        return 0
-
-    return int(
-        data[column]
-        .dropna()
-        .nunique()
-    )
-
-
-def clean_string_series(series):
-    """
-    Clean a text series for missing-value checks.
-    """
-    return (
-        series
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
-
-
-def create_not_null_check(
-    data,
-    column,
-    label,
-    dataset_name
-):
-    """
-    Create a completeness check for one column.
-    """
-    total_records = len(
-        data
-    )
-
-    if column not in data.columns:
         return {
-            "dataset": dataset_name,
-            "check": label,
+            "record_type": record_type,
+            "quality_check": label,
             "column": column,
+            "available": False,
+            "total_count": total_records,
             "valid_count": 0,
             "invalid_count": total_records,
-            "valid_percentage": 0.0,
-            "invalid_percentage": 100.0 if total_records > 0 else 0.0,
-            "status": "Unavailable",
-            "issue": f"Column '{column}' is unavailable"
+            "validity_rate": 0.0
         }
 
-    values = data[
-        column
-    ]
-
-    if (
-        pd.api.types.is_object_dtype(values)
-        or pd.api.types.is_string_dtype(values)
-    ):
-        valid_mask = (
-            clean_string_series(
-                values
-            )
-            != ""
-        )
-    else:
-        valid_mask = values.notna()
-
-    valid_count = int(
-        valid_mask.sum()
-    )
-
-    invalid_count = int(
-        total_records - valid_count
-    )
-
-    valid_percentage = calculate_percentage(
-        valid_count,
-        total_records
-    )
-
-    return build_quality_result(
-        dataset_name=dataset_name,
-        check_label=label,
-        column=column,
-        valid_count=valid_count,
-        invalid_count=invalid_count,
-        valid_percentage=valid_percentage,
-        issue=(
-            f"{invalid_count:,} records contain missing values"
-            if invalid_count > 0
-            else "No missing values detected"
-        )
-    )
-
-
-def create_datetime_check(
-    data,
-    column,
-    label,
-    dataset_name
-):
-    """
-    Create a valid-datetime check.
-    """
-    total_records = len(
-        data
-    )
-
-    if column not in data.columns:
-        return {
-            "dataset": dataset_name,
-            "check": label,
-            "column": column,
-            "valid_count": 0,
-            "invalid_count": total_records,
-            "valid_percentage": 0.0,
-            "invalid_percentage": 100.0 if total_records > 0 else 0.0,
-            "status": "Unavailable",
-            "issue": f"Column '{column}' is unavailable"
-        }
-
-    parsed_values = pd.to_datetime(
-        data[column],
-        errors="coerce"
-    )
-
-    valid_count = int(
-        parsed_values.notna().sum()
-    )
-
-    invalid_count = int(
-        total_records - valid_count
-    )
-
-    valid_percentage = calculate_percentage(
-        valid_count,
-        total_records
-    )
-
-    return build_quality_result(
-        dataset_name=dataset_name,
-        check_label=label,
-        column=column,
-        valid_count=valid_count,
-        invalid_count=invalid_count,
-        valid_percentage=valid_percentage,
-        issue=(
-            f"{invalid_count:,} invalid or missing datetime values"
-            if invalid_count > 0
-            else "All datetime values are valid"
-        )
-    )
-
-
-def create_non_negative_numeric_check(
-    data,
-    column,
-    label,
-    dataset_name
-):
-    """
-    Create a check requiring a numeric value greater than or equal to zero.
-    """
-    total_records = len(
-        data
-    )
-
-    if column not in data.columns:
-        return {
-            "dataset": dataset_name,
-            "check": label,
-            "column": column,
-            "valid_count": 0,
-            "invalid_count": total_records,
-            "valid_percentage": 0.0,
-            "invalid_percentage": 100.0 if total_records > 0 else 0.0,
-            "status": "Unavailable",
-            "issue": f"Column '{column}' is unavailable"
-        }
-
-    numeric_values = pd.to_numeric(
-        data[column],
-        errors="coerce"
-    )
-
-    valid_mask = (
-        numeric_values.notna()
-        & (
-            numeric_values >= 0
-        )
-    )
-
-    valid_count = int(
-        valid_mask.sum()
-    )
-
-    invalid_count = int(
-        total_records - valid_count
-    )
-
-    valid_percentage = calculate_percentage(
-        valid_count,
-        total_records
-    )
-
-    return build_quality_result(
-        dataset_name=dataset_name,
-        check_label=label,
-        column=column,
-        valid_count=valid_count,
-        invalid_count=invalid_count,
-        valid_percentage=valid_percentage,
-        issue=(
-            f"{invalid_count:,} missing or negative values"
-            if invalid_count > 0
-            else "All values are valid and non-negative"
-        )
-    )
-
-
-def create_binary_flag_check(
-    data,
-    column,
-    label,
-    dataset_name
-):
-    """
-    Create a check for binary 0/1 fields.
-    """
-    total_records = len(
-        data
-    )
-
-    if column not in data.columns:
-        return {
-            "dataset": dataset_name,
-            "check": label,
-            "column": column,
-            "valid_count": 0,
-            "invalid_count": total_records,
-            "valid_percentage": 0.0,
-            "invalid_percentage": 100.0 if total_records > 0 else 0.0,
-            "status": "Unavailable",
-            "issue": f"Column '{column}' is unavailable"
-        }
-
-    numeric_values = pd.to_numeric(
-        data[column],
-        errors="coerce"
-    )
-
-    valid_mask = numeric_values.isin(
-        [
-            0,
-            1
+    valid_flags = normalize_binary_flag(
+        data[
+            column
         ]
     )
 
     valid_count = int(
-        valid_mask.sum()
+        valid_flags.sum()
     )
 
-    invalid_count = int(
-        total_records - valid_count
-    )
-
-    valid_percentage = calculate_percentage(
-        valid_count,
-        total_records
-    )
-
-    return build_quality_result(
-        dataset_name=dataset_name,
-        check_label=label,
-        column=column,
-        valid_count=valid_count,
-        invalid_count=invalid_count,
-        valid_percentage=valid_percentage,
-        issue=(
-            f"{invalid_count:,} values are not valid binary flags"
-            if invalid_count > 0
-            else "All values are valid binary flags"
-        )
-    )
-
-
-def build_quality_result(
-    dataset_name,
-    check_label,
-    column,
-    valid_count,
-    invalid_count,
-    valid_percentage,
-    issue
-):
-    """
-    Build a standardized quality-check result.
-    """
-    invalid_percentage = max(
-        100 - valid_percentage,
+    invalid_count = max(
+        total_records - valid_count,
         0
     )
 
-    if valid_percentage >= PASS_THRESHOLD:
-        status = "Pass"
-
-    elif valid_percentage >= WARNING_THRESHOLD:
-        status = "Review"
-
-    else:
-        status = "Attention"
-
     return {
-        "dataset": dataset_name,
-        "check": check_label,
+        "record_type": record_type,
+        "quality_check": label,
         "column": column,
-        "valid_count": int(
-            valid_count
-        ),
-        "invalid_count": int(
-            invalid_count
-        ),
-        "valid_percentage": float(
-            valid_percentage
-        ),
-        "invalid_percentage": float(
-            invalid_percentage
-        ),
-        "status": status,
-        "issue": issue
+        "available": True,
+        "total_count": total_records,
+        "valid_count": valid_count,
+        "invalid_count": invalid_count,
+        "validity_rate": safe_percentage(
+            valid_count,
+            total_records
+        )
     }
 
 
-def prepare_quality_checks(
+def prepare_primary_quality_results(
     incident_data,
     arrest_data
 ):
     """
-    Create the primary percentage-based quality checks.
+    Calculate all configured primary quality checks.
     """
-    checks = []
+    results = []
 
-    incident_checks = [
-        create_not_null_check(
-            data=incident_data,
-            column="incident_id",
-            label="Incident ID",
-            dataset_name="Incident"
-        ),
-        create_not_null_check(
-            data=incident_data,
-            column="case_number",
-            label="Incident Case Number",
-            dataset_name="Incident"
-        ),
-        create_datetime_check(
-            data=incident_data,
-            column="occurred_datetime",
-            label="Occurred Datetime",
-            dataset_name="Incident"
-        ),
-        create_datetime_check(
-            data=incident_data,
-            column="reported_datetime",
-            label="Reported Datetime",
-            dataset_name="Incident"
-        ),
-        create_not_null_check(
-            data=incident_data,
-            column="crime_group",
-            label="Crime Group",
-            dataset_name="Incident"
-        ),
-        create_not_null_check(
-            data=incident_data,
-            column="location_group",
-            label="Location Group",
-            dataset_name="Incident"
-        ),
-        create_not_null_check(
-            data=incident_data,
-            column="disposition_group",
-            label="Disposition Group",
-            dataset_name="Incident"
-        ),
-        create_non_negative_numeric_check(
-            data=incident_data,
-            column="report_delay_hours",
-            label="Reporting Delay",
-            dataset_name="Incident"
+    for check in INCIDENT_PRIMARY_CHECKS:
+        results.append(
+            calculate_check_result(
+                data=incident_data,
+                label=check[
+                    "label"
+                ],
+                column=check[
+                    "column"
+                ],
+                record_type="Incident"
+            )
         )
-    ]
 
-    arrest_checks = [
-        create_not_null_check(
-            data=arrest_data,
-            column="arrest_id",
-            label="Arrest ID",
-            dataset_name="Arrest"
-        ),
-        create_not_null_check(
-            data=arrest_data,
-            column="arrest_number",
-            label="Arrest Number",
-            dataset_name="Arrest"
-        ),
-        create_not_null_check(
-            data=arrest_data,
-            column="case_number",
-            label="Arrest Case Number",
-            dataset_name="Arrest"
-        ),
-        create_datetime_check(
-            data=arrest_data,
-            column="arrested_datetime",
-            label="Arrest Datetime",
-            dataset_name="Arrest"
-        ),
-        create_not_null_check(
-            data=arrest_data,
-            column="charge_category",
-            label="Charge Category",
-            dataset_name="Arrest"
+    for check in ARREST_PRIMARY_CHECKS:
+        results.append(
+            calculate_check_result(
+                data=arrest_data,
+                label=check[
+                    "label"
+                ],
+                column=check[
+                    "column"
+                ],
+                record_type="Arrest"
+            )
         )
-    ]
-
-    checks.extend(
-        incident_checks
-    )
-
-    checks.extend(
-        arrest_checks
-    )
 
     return pd.DataFrame(
-        checks
+        results
     )
 
 
-def create_percentage_validity_chart(
-    quality_checks
+def calculate_weighted_pass_rate(quality_results):
+    """
+    Calculate a weighted pass rate across available checks.
+
+    Each evaluated record-field combination contributes once.
+    """
+    if (
+        quality_results is None
+        or quality_results.empty
+    ):
+        return {
+            "valid_results": 0,
+            "evaluated_results": 0,
+            "failed_results": 0,
+            "pass_rate": 0.0,
+            "available_checks": 0
+        }
+
+    available_results = quality_results[
+        quality_results[
+            "available"
+        ]
+        == True
+    ].copy()
+
+    if available_results.empty:
+        return {
+            "valid_results": 0,
+            "evaluated_results": 0,
+            "failed_results": 0,
+            "pass_rate": 0.0,
+            "available_checks": 0
+        }
+
+    valid_results = int(
+        available_results[
+            "valid_count"
+        ].sum()
+    )
+
+    evaluated_results = int(
+        available_results[
+            "total_count"
+        ].sum()
+    )
+
+    failed_results = max(
+        evaluated_results - valid_results,
+        0
+    )
+
+    return {
+        "valid_results": valid_results,
+        "evaluated_results": evaluated_results,
+        "failed_results": failed_results,
+        "pass_rate": safe_percentage(
+            valid_results,
+            evaluated_results
+        ),
+        "available_checks": len(
+            available_results
+        )
+    }
+
+
+def get_records_needing_review(
+    data,
+    quality_columns
 ):
     """
-    Create a 100% stacked horizontal validity chart.
-
-    Each row displays:
-    - valid percentage
-    - invalid percentage
-    - valid and invalid counts in hover
+    Return records failing at least one available primary check.
     """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    available_columns = [
+        column
+        for column in quality_columns
+        if column in data.columns
+    ]
+
+    if not available_columns:
+        return data.iloc[
+            0:0
+        ].copy()
+
+    review_mask = pd.Series(
+        False,
+        index=data.index
+    )
+
+    for column in available_columns:
+        valid_flag = normalize_binary_flag(
+            data[
+                column
+            ]
+        )
+
+        review_mask = (
+            review_mask
+            | (
+                valid_flag == 0
+            )
+        )
+
+    return data[
+        review_mask
+    ].copy()
+
+
+def add_review_reason(
+    data,
+    quality_definitions
+):
+    """
+    Add a readable explanation of which primary checks failed.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    review_data = data.copy()
+
+    def get_failed_checks(row):
+        failed_checks = []
+
+        for definition in quality_definitions:
+            column = definition[
+                "column"
+            ]
+
+            if column not in review_data.columns:
+                continue
+
+            value = pd.to_numeric(
+                row[
+                    column
+                ],
+                errors="coerce"
+            )
+
+            if pd.isna(
+                value
+            ) or value != 1:
+                failed_checks.append(
+                    definition[
+                        "label"
+                    ]
+                )
+
+        if not failed_checks:
+            return "Review required"
+
+        return ", ".join(
+            failed_checks
+        )
+
+    review_data[
+        "review_reason"
+    ] = review_data.apply(
+        get_failed_checks,
+        axis=1
+    )
+
+    return review_data
+
+
+def add_reporting_delay_context(data):
+    """
+    Add a simple reporting-delay issue description.
+
+    This makes it clear when a report datetime occurs before the
+    occurrence datetime.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    working_data = data.copy()
+
+    if (
+        "occurred_datetime" not in working_data.columns
+        or "reported_datetime" not in working_data.columns
+    ):
+        return working_data
+
+    occurred_values = pd.to_datetime(
+        working_data[
+            "occurred_datetime"
+        ],
+        errors="coerce"
+    )
+
+    reported_values = pd.to_datetime(
+        working_data[
+            "reported_datetime"
+        ],
+        errors="coerce"
+    )
+
+    reported_before_occurrence = (
+        occurred_values.notna()
+        & reported_values.notna()
+        & (
+            reported_values
+            < occurred_values
+        )
+    )
+
+    working_data[
+        "delay_review_note"
+    ] = ""
+
+    working_data.loc[
+        reported_before_occurrence,
+        "delay_review_note"
+    ] = (
+        "Reported datetime is earlier than occurred datetime"
+    )
+
+    if "report_delay_hours" in working_data.columns:
+        delay_values = pd.to_numeric(
+            working_data[
+                "report_delay_hours"
+            ],
+            errors="coerce"
+        )
+
+        missing_delay_mask = (
+            working_data[
+                "delay_review_note"
+            ]
+            == ""
+        ) & delay_values.isna()
+
+        working_data.loc[
+            missing_delay_mask,
+            "delay_review_note"
+        ] = (
+            "Reporting delay is missing or unusable"
+        )
+
+    return working_data
+
+
+def create_quality_percentage_chart(quality_results):
+    """
+    Create a field-level quality percentage chart.
+    """
+    available_data = quality_results[
+        quality_results[
+            "available"
+        ]
+        == True
+    ].copy()
+
     figure = go.Figure()
 
-    if quality_checks.empty:
+    if available_data.empty:
         figure.add_annotation(
-            text="Data-quality checks are unavailable.",
+            text="Primary quality-check data is unavailable.",
             x=0.5,
             y=0.5,
             xref="paper",
@@ -530,7 +591,7 @@ def create_percentage_validity_chart(
         )
 
         figure.update_layout(
-            title="Data Validity by Field",
+            title="Primary Field Check Results",
             height=QUALITY_CHART_HEIGHT,
             paper_bgcolor="#0B111C",
             plot_bgcolor="#0B111C"
@@ -538,27 +599,31 @@ def create_percentage_validity_chart(
 
         return figure
 
-    chart_data = quality_checks.copy()
-
-    chart_data["display_check"] = (
-        chart_data["dataset"]
-        + " — "
-        + chart_data["check"]
+    chart_data = available_data.sort_values(
+        "validity_rate",
+        ascending=True
     )
 
-    chart_data = chart_data.iloc[
-        ::-1
-    ].copy()
+    chart_data[
+        "invalidity_rate"
+    ] = (
+        100
+        - chart_data[
+            "validity_rate"
+        ]
+    ).clip(
+        lower=0
+    )
 
     figure.add_trace(
         go.Bar(
             x=chart_data[
-                "valid_percentage"
+                "validity_rate"
             ],
             y=chart_data[
-                "display_check"
+                "quality_check"
             ],
-            name="Valid",
+            name="Passed",
             orientation="h",
             marker={
                 "color": "#6AC7B6"
@@ -566,16 +631,14 @@ def create_percentage_validity_chart(
             customdata=chart_data[
                 [
                     "valid_count",
-                    "invalid_count",
-                    "status"
+                    "total_count"
                 ]
             ],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "Valid: %{x:.1f}%<br>"
-                "Valid records: %{customdata[0]:,}<br>"
-                "Invalid records: %{customdata[1]:,}<br>"
-                "Status: %{customdata[2]}"
+                "Pass rate: %{x:.2f}%<br>"
+                "Passed results: %{customdata[0]:,}<br>"
+                "Records evaluated: %{customdata[1]:,}"
                 "<extra></extra>"
             )
         )
@@ -584,29 +647,27 @@ def create_percentage_validity_chart(
     figure.add_trace(
         go.Bar(
             x=chart_data[
-                "invalid_percentage"
+                "invalidity_rate"
             ],
             y=chart_data[
-                "display_check"
+                "quality_check"
             ],
-            name="Invalid",
+            name="Needs Review",
             orientation="h",
             marker={
-                "color": "#D95F65"
+                "color": "#E78A98"
             },
             customdata=chart_data[
                 [
                     "invalid_count",
-                    "valid_count",
-                    "status"
+                    "total_count"
                 ]
             ],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                "Invalid: %{x:.1f}%<br>"
-                "Invalid records: %{customdata[0]:,}<br>"
-                "Valid records: %{customdata[1]:,}<br>"
-                "Status: %{customdata[2]}"
+                "Needs-review rate: %{x:.2f}%<br>"
+                "Flagged results: %{customdata[0]:,}<br>"
+                "Records evaluated: %{customdata[1]:,}"
                 "<extra></extra>"
             )
         )
@@ -614,7 +675,7 @@ def create_percentage_validity_chart(
 
     figure.update_layout(
         title={
-            "text": "Data Validity by Field",
+            "text": "Primary Field Completeness and Format Checks",
             "x": 0,
             "xanchor": "left",
             "font": {
@@ -625,7 +686,7 @@ def create_percentage_validity_chart(
         barmode="stack",
         height=QUALITY_CHART_HEIGHT,
         margin={
-            "l": 205,
+            "l": 225,
             "r": 30,
             "t": 80,
             "b": 55
@@ -642,13 +703,13 @@ def create_percentage_validity_chart(
             "xanchor": "right",
             "x": 1,
             "font": {
-                "size": 11,
+                "size": 10,
                 "color": "#E2E8F0"
             }
         },
         xaxis={
             "title": {
-                "text": "Record Validity"
+                "text": "Share of Records Evaluated"
             },
             "range": [
                 0,
@@ -657,339 +718,27 @@ def create_percentage_validity_chart(
             "ticksuffix": "%",
             "gridcolor": "rgba(71, 85, 105, 0.50)",
             "showline": True,
-            "linecolor": "#334155",
-            "tickfont": {
-                "size": 11,
-                "color": "#CBD5E1"
-            }
+            "linecolor": "#334155"
         },
         yaxis={
             "title": {
                 "text": ""
             },
             "showgrid": False,
-            "automargin": True,
-            "tickfont": {
-                "size": 10,
-                "color": "#CBD5E1"
-            }
+            "automargin": True
         }
     )
 
     return figure
 
 
-def count_duplicate_records(
-    data,
-    column
-):
-    """
-    Count records participating in duplicate values.
-    """
-    if (
-        data is None
-        or data.empty
-        or column not in data.columns
-    ):
-        return 0
-
-    values = data[
-        column
-    ].dropna()
-
-    return int(
-        values.duplicated(
-            keep=False
-        ).sum()
-    )
-
-
-def count_missing_or_unknown(
-    data,
-    column
-):
-    """
-    Count missing or unknown categorical values.
-    """
-    if (
-        data is None
-        or data.empty
-        or column not in data.columns
-    ):
-        return 0
-
-    values = clean_string_series(
-        data[
-            column
-        ]
-    ).str.lower()
-
-    invalid_values = {
-        "",
-        "unknown",
-        "n/a",
-        "na",
-        "none",
-        "missing",
-        "not available"
-    }
-
-    return int(
-        values.isin(
-            invalid_values
-        ).sum()
-    )
-
-
-def count_invalid_reporting_delays(
-    incident_data
-):
-    """
-    Count missing or negative reporting-delay values.
-    """
-    if (
-        incident_data is None
-        or incident_data.empty
-        or "report_delay_hours" not in incident_data.columns
-    ):
-        return len(
-            incident_data
-        )
-
-    delay_values = pd.to_numeric(
-        incident_data[
-            "report_delay_hours"
-        ],
-        errors="coerce"
-    )
-
-    invalid_mask = (
-        delay_values.isna()
-        | (
-            delay_values < 0
-        )
-    )
-
-    return int(
-        invalid_mask.sum()
-    )
-
-
-def prepare_diagnostic_checks(
-    incident_data,
-    arrest_data
-):
-    """
-    Prepare a compact set of operational quality diagnostics.
-    """
-    incident_count = len(
-        incident_data
-    )
-
-    arrest_count = len(
-        arrest_data
-    )
-
-    diagnostics = [
-        {
-            "Check": "Duplicate incident IDs",
-            "Dataset": "Incident",
-            "Affected Records": count_duplicate_records(
-                incident_data,
-                "incident_id"
-            )
-        },
-        {
-            "Check": "Duplicate arrest IDs",
-            "Dataset": "Arrest",
-            "Affected Records": count_duplicate_records(
-                arrest_data,
-                "arrest_id"
-            )
-        },
-        {
-            "Check": "Missing incident case numbers",
-            "Dataset": "Incident",
-            "Affected Records": (
-                incident_count
-                - (
-                    clean_string_series(
-                        incident_data[
-                            "case_number"
-                        ]
-                    )
-                    != ""
-                ).sum()
-                if "case_number" in incident_data.columns
-                else incident_count
-            )
-        },
-        {
-            "Check": "Missing arrest case numbers",
-            "Dataset": "Arrest",
-            "Affected Records": (
-                arrest_count
-                - (
-                    clean_string_series(
-                        arrest_data[
-                            "case_number"
-                        ]
-                    )
-                    != ""
-                ).sum()
-                if "case_number" in arrest_data.columns
-                else arrest_count
-            )
-        },
-        {
-            "Check": "Invalid reporting delays",
-            "Dataset": "Incident",
-            "Affected Records": count_invalid_reporting_delays(
-                incident_data
-            )
-        },
-        {
-            "Check": "Unknown incident locations",
-            "Dataset": "Incident",
-            "Affected Records": count_missing_or_unknown(
-                incident_data,
-                "location_group"
-            )
-        },
-        {
-            "Check": "Unknown incident outcomes",
-            "Dataset": "Incident",
-            "Affected Records": count_missing_or_unknown(
-                incident_data,
-                "disposition_group"
-            )
-        },
-        {
-            "Check": "Unknown arrest charge categories",
-            "Dataset": "Arrest",
-            "Affected Records": count_missing_or_unknown(
-                arrest_data,
-                "charge_category"
-            )
-        }
-    ]
-
-    diagnostic_data = pd.DataFrame(
-        diagnostics
-    )
-
-    diagnostic_data[
-        "Affected Records"
-    ] = pd.to_numeric(
-        diagnostic_data[
-            "Affected Records"
-        ],
-        errors="coerce"
-    ).fillna(0).astype(int)
-
-    diagnostic_data["Status"] = diagnostic_data[
-        "Affected Records"
-    ].apply(
-        lambda count: (
-            "Pass"
-            if count == 0
-            else "Review"
-        )
-    )
-
-    diagnostic_data = diagnostic_data[
-        [
-            "Dataset",
-            "Check",
-            "Status",
-            "Affected Records"
-        ]
-    ]
-
-    return diagnostic_data
-
-
-def get_overall_validity(
-    quality_checks
-):
-    """
-    Calculate the weighted validity percentage across all checks.
-    """
-    if quality_checks.empty:
-        return 0.0
-
-    total_valid = quality_checks[
-        "valid_count"
-    ].sum()
-
-    total_checked = (
-        quality_checks[
-            "valid_count"
-        ].sum()
-        + quality_checks[
-            "invalid_count"
-        ].sum()
-    )
-
-    return calculate_percentage(
-        total_valid,
-        total_checked
-    )
-
-
-def get_lowest_quality_check(
-    quality_checks
-):
-    """
-    Return the check with the lowest validity percentage.
-    """
-    if quality_checks.empty:
-        return {
-            "check": "N/A",
-            "dataset": "N/A",
-            "valid_percentage": 0.0,
-            "invalid_count": 0
-        }
-
-    lowest_row = quality_checks.sort_values(
-        [
-            "valid_percentage",
-            "invalid_count"
-        ],
-        ascending=[
-            True,
-            False
-        ]
-    ).iloc[0]
-
-    return {
-        "check": lowest_row[
-            "check"
-        ],
-        "dataset": lowest_row[
-            "dataset"
-        ],
-        "valid_percentage": float(
-            lowest_row[
-                "valid_percentage"
-            ]
-        ),
-        "invalid_count": int(
-            lowest_row[
-                "invalid_count"
-            ]
-        )
-    }
-
-
 def show_quality_summary(
     incident_data,
     arrest_data,
-    quality_checks,
-    diagnostic_checks
+    quality_results
 ):
     """
-    Display compact data-quality summary metrics.
+    Display compact quality summary metrics.
     """
     incident_count = len(
         incident_data
@@ -999,101 +748,93 @@ def show_quality_summary(
         arrest_data
     )
 
-    overall_validity = get_overall_validity(
-        quality_checks
+    weighted_result = calculate_weighted_pass_rate(
+        quality_results
     )
 
-    passing_checks = int(
-        (
-            quality_checks[
-                "status"
+    incident_review_data = get_records_needing_review(
+        incident_data,
+        [
+            check[
+                "column"
             ]
-            == "Pass"
-        ).sum()
+            for check in INCIDENT_PRIMARY_CHECKS
+        ]
     )
 
-    checks_requiring_review = int(
-        (
-            quality_checks[
-                "status"
+    arrest_review_data = get_records_needing_review(
+        arrest_data,
+        [
+            check[
+                "column"
             ]
-            != "Pass"
-        ).sum()
-    )
-
-    total_affected_diagnostics = int(
-        diagnostic_checks[
-            "Affected Records"
-        ].sum()
-    )
-
-    lowest_check = get_lowest_quality_check(
-        quality_checks
+            for check in ARREST_PRIMARY_CHECKS
+        ]
     )
 
     overview_items = [
         {
-            "label": "Incident Records",
+            "label": "Incident Records Evaluated",
             "value": format_number(
                 incident_count
             ),
-            "meta": "Current filtered view",
+            "meta": "Distinct selected incidents",
             "numeric": True
         },
         {
-            "label": "Arrest Records",
+            "label": "Arrest Records Evaluated",
             "value": format_number(
                 arrest_count
             ),
-            "meta": "Linked arrest view",
+            "meta": "Distinct linked arrests",
             "numeric": True
         },
         {
-            "label": "Overall Validity",
-            "value": format_percentage(
-                overall_validity
-            ),
-            "meta": "Across field checks",
-            "numeric": True
-        },
-        {
-            "label": "Passing Checks",
-            "value": format_number(
-                passing_checks
-            ),
-            "meta": f"Out of {len(quality_checks)} checks",
-            "numeric": True
-        },
-        {
-            "label": "Checks to Review",
-            "value": format_number(
-                checks_requiring_review
-            ),
-            "meta": "Below pass threshold",
-            "numeric": True
-        },
-        {
-            "label": "Lowest Validity",
-            "value": lowest_check[
-                "check"
-            ],
-            "meta": format_percentage(
-                lowest_check[
-                    "valid_percentage"
+            "label": "Primary Field Check Pass Rate",
+            "value": format_precise_percentage(
+                weighted_result[
+                    "pass_rate"
                 ]
             ),
-            "badge": format_number(
-                lowest_check[
-                    "invalid_count"
-                ]
+            "meta": (
+                f"{format_number(weighted_result['valid_results'])} "
+                "passed results"
+            ),
+            "numeric": True,
+            "help": (
+                "Total passed record-field checks divided by all evaluated "
+                "record-field checks. This measures configured completeness "
+                "and format rules; it does not prove perfect source accuracy."
             )
         },
         {
-            "label": "Diagnostic Flags",
+            "label": "Primary Checks Available",
             "value": format_number(
-                total_affected_diagnostics
+                weighted_result[
+                    "available_checks"
+                ]
             ),
-            "meta": "Affected record occurrences",
+            "meta": "Configured field checks",
+            "numeric": True
+        },
+        {
+            "label": "Incident Records for Review",
+            "value": format_number(
+                len(
+                    incident_review_data
+                )
+            ),
+            "meta": "Failed at least one check",
+            "numeric": True
+        },
+        {
+            "label": "Arrest Records for Review",
+            "value": format_number(
+                len(
+                    arrest_review_data
+                )
+            ),
+            "meta": "Failed at least one check",
             "numeric": True
         }
     ]
@@ -1102,336 +843,127 @@ def show_quality_summary(
         overview_items
     )
 
-    if checks_requiring_review == 0:
-        show_insight(
-            f"All {format_number(len(quality_checks))} primary field "
-            f"checks meet the {PASS_THRESHOLD:.1f}% validity threshold. "
-            f"Overall weighted validity is "
-            f"{format_percentage(overall_validity)}."
+    show_insight(
+        f"The configured primary field checks achieved a "
+        f"{format_precise_percentage(weighted_result['pass_rate'])} "
+        f"weighted pass rate. "
+        f"{format_number(len(incident_review_data))} incident records and "
+        f"{format_number(len(arrest_review_data))} arrest records failed "
+        f"at least one available primary check."
+    )
+
+    show_info_hint(
+        "What this score means",
+        (
+            "The pass rate measures whether configured fields are present, "
+            "formatted, and usable according to project rules. It does not "
+            "confirm that every source value, category assignment, location, "
+            "or incident-to-arrest match is factually correct."
         )
-    else:
-        show_insight(
-            f"{format_number(checks_requiring_review)} primary checks "
-            f"require review. {lowest_check['dataset']} — "
-            f"{lowest_check['check']} has the lowest validity at "
-            f"{format_percentage(lowest_check['valid_percentage'])}, "
-            f"with {format_number(lowest_check['invalid_count'])} "
-            f"affected records."
-        )
+    )
+
+    return {
+        "weighted_result": weighted_result,
+        "incident_review_data": incident_review_data,
+        "arrest_review_data": arrest_review_data
+    }
 
 
-def show_quality_chart(
-    quality_checks
-):
+def show_primary_quality_chart(quality_results):
     """
-    Display percentage-based validity by field.
+    Display field-level primary quality results.
     """
-    figure = create_percentage_validity_chart(
-        quality_checks
+    figure = create_quality_percentage_chart(
+        quality_results
     )
 
     st.plotly_chart(
         figure,
         use_container_width=True,
-        key="data_quality_percentage_validity_chart",
+        key="data_quality_primary_checks_chart",
         config=get_chart_config()
     )
 
-    lowest_check = get_lowest_quality_check(
-        quality_checks
-    )
-
     show_insight(
-        f"{lowest_check['dataset']} — {lowest_check['check']} is the "
-        f"lowest-validity primary field check at "
-        f"{format_percentage(lowest_check['valid_percentage'])}. "
-        f"Hover over each bar to inspect valid and invalid counts."
-    )
-
-
-def show_diagnostic_table(
-    diagnostic_checks
-):
-    """
-    Display a compact quality-diagnostics table.
-    """
-    st.markdown(
-        "#### Quality Check Diagnostics"
+        "The chart shows field-level pass percentages. Red segments identify "
+        "the portion of evaluated records that failed each configured check."
     )
 
     show_info_hint(
-        "How to read this table",
+        "Reporting-delay review",
         (
-            "A Pass indicates that no affected records were detected. "
-            "Review indicates that one or more records should be inspected. "
-            "Affected-record totals may overlap across checks."
+            "Records with an impossible or unusable reporting-delay sequence "
+            "remain visible in the review panel and are excluded from median, "
+            "P90, and delay-bucket calculations."
         )
     )
 
-    display_data = diagnostic_checks.copy()
 
-    display_data["Affected Records"] = (
-        display_data["Affected Records"]
-        .map(
-            lambda value: f"{int(value):,}"
-        )
-    )
-
-    st.dataframe(
-        display_data,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Dataset": st.column_config.TextColumn(
-                "Dataset",
-                width="small"
-            ),
-            "Check": st.column_config.TextColumn(
-                "Quality Check",
-                width="large"
-            ),
-            "Status": st.column_config.TextColumn(
-                "Status",
-                width="small"
-            ),
-            "Affected Records": st.column_config.TextColumn(
-                "Affected Records",
-                width="small"
-            )
-        }
-    )
-
-
-def get_invalid_incident_records(
-    incident_data
+def show_review_records(
+    incident_review_data,
+    arrest_review_data
 ):
     """
-    Return incident records with one or more core quality issues.
+    Display primary-check failures in a collapsed review panel.
     """
-    if incident_data is None or incident_data.empty:
-        return pd.DataFrame()
-
-    invalid_mask = pd.Series(
-        False,
-        index=incident_data.index
-    )
-
-    if "incident_id" in incident_data.columns:
-        incident_ids = clean_string_series(
-            incident_data[
-                "incident_id"
-            ]
+    total_review_records = (
+        len(
+            incident_review_data
         )
-
-        invalid_mask = (
-            invalid_mask
-            | (
-                incident_ids
-                == ""
-            )
-            | incident_data[
-                "incident_id"
-            ].duplicated(
-                keep=False
-            )
+        + len(
+            arrest_review_data
         )
-
-    if "case_number" in incident_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | (
-                clean_string_series(
-                    incident_data[
-                        "case_number"
-                    ]
-                )
-                == ""
-            )
-        )
-
-    if "occurred_datetime" in incident_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | pd.to_datetime(
-                incident_data[
-                    "occurred_datetime"
-                ],
-                errors="coerce"
-            ).isna()
-        )
-
-    if "reported_datetime" in incident_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | pd.to_datetime(
-                incident_data[
-                    "reported_datetime"
-                ],
-                errors="coerce"
-            ).isna()
-        )
-
-    if "report_delay_hours" in incident_data.columns:
-        delay_values = pd.to_numeric(
-            incident_data[
-                "report_delay_hours"
-            ],
-            errors="coerce"
-        )
-
-        invalid_mask = (
-            invalid_mask
-            | delay_values.isna()
-            | (
-                delay_values < 0
-            )
-        )
-
-    return incident_data[
-        invalid_mask
-    ].copy()
-
-
-def get_invalid_arrest_records(
-    arrest_data
-):
-    """
-    Return arrest records with one or more core quality issues.
-    """
-    if arrest_data is None or arrest_data.empty:
-        return pd.DataFrame()
-
-    invalid_mask = pd.Series(
-        False,
-        index=arrest_data.index
-    )
-
-    if "arrest_id" in arrest_data.columns:
-        arrest_ids = clean_string_series(
-            arrest_data[
-                "arrest_id"
-            ]
-        )
-
-        invalid_mask = (
-            invalid_mask
-            | (
-                arrest_ids
-                == ""
-            )
-            | arrest_data[
-                "arrest_id"
-            ].duplicated(
-                keep=False
-            )
-        )
-
-    if "arrest_number" in arrest_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | (
-                clean_string_series(
-                    arrest_data[
-                        "arrest_number"
-                    ]
-                )
-                == ""
-            )
-        )
-
-    if "case_number" in arrest_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | (
-                clean_string_series(
-                    arrest_data[
-                        "case_number"
-                    ]
-                )
-                == ""
-            )
-        )
-
-    if "arrested_datetime" in arrest_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | pd.to_datetime(
-                arrest_data[
-                    "arrested_datetime"
-                ],
-                errors="coerce"
-            ).isna()
-        )
-
-    if "charge_category" in arrest_data.columns:
-        invalid_mask = (
-            invalid_mask
-            | (
-                clean_string_series(
-                    arrest_data[
-                        "charge_category"
-                    ]
-                )
-                == ""
-            )
-        )
-
-    return arrest_data[
-        invalid_mask
-    ].copy()
-
-
-def show_invalid_record_review(
-    incident_data,
-    arrest_data
-):
-    """
-    Display collapsed invalid-record review tables.
-    """
-    invalid_incidents = get_invalid_incident_records(
-        incident_data
-    )
-
-    invalid_arrests = get_invalid_arrest_records(
-        arrest_data
     )
 
     with st.expander(
-        "Invalid and Duplicate Record Review",
+        (
+            "Records Requiring Primary-Check Review "
+            f"({format_number(total_review_records)})"
+        ),
         expanded=False
     ):
         show_info_hint(
-            "About this review panel",
+            "Review panel scope",
             (
-                "These tables show records affected by missing identifiers, "
-                "invalid dates, invalid reporting delays, or duplicate IDs. "
-                "A record may contain more than one quality issue."
+                "These tables contain records that failed at least one "
+                "available primary completeness, format, or reporting-delay "
+                "check."
             )
         )
 
         incident_tab, arrest_tab = st.tabs(
             [
                 (
-                    "Incident records "
-                    f"({format_number(len(invalid_incidents))})"
+                    "Incident Review "
+                    f"({format_number(len(incident_review_data))})"
                 ),
                 (
-                    "Arrest records "
-                    f"({format_number(len(invalid_arrests))})"
+                    "Arrest Review "
+                    f"({format_number(len(arrest_review_data))})"
                 )
             ]
         )
 
         with incident_tab:
-            if invalid_incidents.empty:
+            if incident_review_data.empty:
                 st.success(
-                    "No invalid or duplicate incident records were "
-                    "identified by the current checks."
+                    "No selected incident records failed the available "
+                    "primary quality checks."
                 )
+
             else:
+                incident_review_data = add_review_reason(
+                    data=incident_review_data,
+                    quality_definitions=INCIDENT_PRIMARY_CHECKS
+                )
+
+                incident_review_data = add_reporting_delay_context(
+                    incident_review_data
+                )
+
                 show_compact_record_note(
-                    "Showing the first 25 incident records with one "
-                    "or more detected quality issues."
+                    "Showing the first 25 incident records that failed "
+                    "at least one primary check."
                 )
 
                 incident_columns = [
@@ -1439,36 +971,50 @@ def show_invalid_record_review(
                     "case_number",
                     "occurred_datetime",
                     "reported_datetime",
+                    "report_delay_hours",
+                    "delay_review_note",
                     "crime_group",
                     "location_group",
                     "disposition_group",
-                    "report_delay_hours"
+                    "review_reason",
+                    "has_valid_case_number",
+                    "has_valid_occurred_datetime",
+                    "has_valid_reported_datetime",
+                    "has_valid_reporting_delay"
                 ]
 
-                visible_columns = [
+                available_columns = [
                     column
                     for column in incident_columns
-                    if column in invalid_incidents.columns
+                    if column in incident_review_data.columns
                 ]
 
                 st.dataframe(
-                    invalid_incidents[
-                        visible_columns
-                    ].head(25),
+                    incident_review_data[
+                        available_columns
+                    ].head(
+                        25
+                    ),
                     use_container_width=True,
                     hide_index=True
                 )
 
         with arrest_tab:
-            if invalid_arrests.empty:
+            if arrest_review_data.empty:
                 st.success(
-                    "No invalid or duplicate arrest records were "
-                    "identified by the current checks."
+                    "No selected arrest records failed the available "
+                    "primary quality checks."
                 )
+
             else:
+                arrest_review_data = add_review_reason(
+                    data=arrest_review_data,
+                    quality_definitions=ARREST_PRIMARY_CHECKS
+                )
+
                 show_compact_record_note(
-                    "Showing the first 25 arrest records with one "
-                    "or more detected quality issues."
+                    "Showing the first 25 arrest records that failed "
+                    "at least one primary check."
                 )
 
                 arrest_columns = [
@@ -1478,20 +1024,25 @@ def show_invalid_record_review(
                     "arrested_datetime",
                     "charge_category",
                     "arrested_charge",
-                    "race",
-                    "sex"
+                    "review_reason",
+                    "has_valid_arrest_number",
+                    "has_valid_case_number",
+                    "has_valid_arrested_datetime",
+                    "has_charge_text"
                 ]
 
-                visible_columns = [
+                available_columns = [
                     column
                     for column in arrest_columns
-                    if column in invalid_arrests.columns
+                    if column in arrest_review_data.columns
                 ]
 
                 st.dataframe(
-                    invalid_arrests[
-                        visible_columns
-                    ].head(25),
+                    arrest_review_data[
+                        available_columns
+                    ].head(
+                        25
+                    ),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -1502,46 +1053,47 @@ def show_data_quality(
     arrest_data
 ):
     """
-    Display the complete data-quality section.
+    Display the complete data quality section.
     """
+    distinct_incident_data = get_distinct_incident_data(
+        incident_data
+    )
+
+    distinct_arrest_data = get_distinct_arrest_data(
+        arrest_data
+    )
+
     show_section_banner(
-        eyebrow="Trust and Validation",
-        title="Data Quality Profile",
+        eyebrow="Data Reliability",
+        title="Field Quality and Review Profile",
         description=(
-            "Assess field validity, identify records requiring review, "
-            "and verify the reliability of the filtered incident and "
-            "arrest datasets."
+            "Evaluate configured completeness and format checks, then "
+            "inspect records requiring additional review."
         )
     )
 
-    quality_checks = prepare_quality_checks(
-        incident_data=incident_data,
-        arrest_data=arrest_data
+    quality_results = prepare_primary_quality_results(
+        incident_data=distinct_incident_data,
+        arrest_data=distinct_arrest_data
     )
 
-    diagnostic_checks = prepare_diagnostic_checks(
-        incident_data=incident_data,
-        arrest_data=arrest_data
+    summary = show_quality_summary(
+        incident_data=distinct_incident_data,
+        arrest_data=distinct_arrest_data,
+        quality_results=quality_results
     )
 
-    show_quality_summary(
-        incident_data=incident_data,
-        arrest_data=arrest_data,
-        quality_checks=quality_checks,
-        diagnostic_checks=diagnostic_checks
+    # st.divider()
+
+    show_primary_quality_chart(
+        quality_results
     )
 
-    st.divider()
-
-    show_quality_chart(
-        quality_checks
-    )
-
-    show_diagnostic_table(
-        diagnostic_checks
-    )
-
-    show_invalid_record_review(
-        incident_data=incident_data,
-        arrest_data=arrest_data
+    show_review_records(
+        incident_review_data=summary[
+            "incident_review_data"
+        ],
+        arrest_review_data=summary[
+            "arrest_review_data"
+        ]
     )

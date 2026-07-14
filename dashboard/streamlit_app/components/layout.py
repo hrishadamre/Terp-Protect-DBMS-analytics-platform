@@ -7,10 +7,10 @@ Responsibilities:
 - Apply global dashboard styling
 - Display the dashboard header
 - Display compact section banners
-- Display reusable notes and insight messages
-- Display sidebar filter summaries and help
+- Display analytical insights and notes
+- Display sidebar summaries
 - Display compact overview cards
-- Display metric-definition tooltips
+- Provide one reusable help-tooltip component
 - Display contextual Data Review Panel help
 """
 
@@ -19,8 +19,49 @@ import re
 
 import streamlit as st
 
-from components.metrics import get_metric_help
 from components.theme import get_theme
+
+
+def build_help_icon(
+    help_text,
+    aria_label="More information"
+):
+    """
+    Build the shared help icon and immediate custom tooltip.
+
+    This is the only tooltip implementation used across:
+    - metric cards
+    - information labels
+    - sidebar guidance
+    - Data Review Panel headings
+    """
+    safe_help_text = html.escape(
+        str(
+            help_text
+        )
+    )
+
+    safe_aria_label = html.escape(
+        str(
+            aria_label
+        )
+    )
+
+    return (
+        '<span class="dashboard-help">'
+        '<span '
+        'class="dashboard-help-icon" '
+        'tabindex="0" '
+        f'aria-label="{safe_aria_label}">'
+        '?'
+        '</span>'
+        '<span '
+        'class="dashboard-help-popup" '
+        'role="tooltip">'
+        f'{safe_help_text}'
+        '</span>'
+        '</span>'
+    )
 
 
 def apply_custom_styles():
@@ -84,6 +125,220 @@ label {{
     font-family: {theme["font"]["family"]};
 }}
 
+
+/* ---------------------------------
+   Shared help tooltip
+---------------------------------- */
+
+.dashboard-help {{
+    position: relative;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 auto;
+
+    overflow: visible;
+    vertical-align: middle;
+}}
+
+.dashboard-help-icon {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 1rem;
+    height: 1rem;
+    padding: 0;
+
+    color: {theme["brand"]["accent"]} !important;
+    background:
+        rgba(118, 199, 232, 0.10);
+
+    border:
+        1px solid rgba(118, 199, 232, 0.52);
+    border-radius: 999px;
+
+    font-family: Arial, sans-serif !important;
+    font-size: 0.66rem;
+    font-weight: 850;
+    line-height: 1;
+
+    cursor: help;
+    user-select: none;
+
+    transition:
+        color 0.05s ease,
+        background-color 0.05s ease,
+        border-color 0.05s ease;
+}}
+
+.dashboard-help:hover
+.dashboard-help-icon,
+.dashboard-help:focus-within
+.dashboard-help-icon {{
+    color: #E8F8FE !important;
+    background:
+        rgba(118, 199, 232, 0.24);
+
+    border-color: {theme["brand"]["accent"]};
+}}
+
+.dashboard-help-popup {{
+    position: absolute;
+    top: 50%;
+    left: calc(100% + 0.55rem);
+    z-index: 9999999;
+
+    width: max-content;
+    min-width: 200px;
+    max-width: min(
+        320px,
+        calc(100vw - 3rem)
+    );
+
+    padding: 0.58rem 0.72rem;
+
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+
+    color: #F8FAFC !important;
+    background: #25262B;
+
+    border: 1px solid #526174;
+    border-radius: 8px;
+
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.46);
+
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif !important;
+
+    font-size: 0.71rem;
+    font-weight: 500;
+    line-height: 1.42;
+    text-align: left;
+    white-space: normal;
+
+    transform:
+        translateY(-50%)
+        translateX(-2px);
+
+    transition:
+        opacity 0.02s ease,
+        transform 0.02s ease,
+        visibility 0.02s ease;
+}}
+
+.dashboard-help-popup::before {{
+    content: "";
+
+    position: absolute;
+    top: 50%;
+    right: 100%;
+
+    transform: translateY(-50%);
+
+    border-width: 6px;
+    border-style: solid;
+    border-color:
+        transparent
+        #526174
+        transparent
+        transparent;
+}}
+
+.dashboard-help-popup::after {{
+    content: "";
+
+    position: absolute;
+    top: 50%;
+    right: calc(100% - 1px);
+
+    transform: translateY(-50%);
+
+    border-width: 5px;
+    border-style: solid;
+    border-color:
+        transparent
+        #25262B
+        transparent
+        transparent;
+}}
+
+.dashboard-help:hover
+.dashboard-help-popup,
+.dashboard-help:focus-within
+.dashboard-help-popup {{
+    visibility: visible;
+    opacity: 1;
+
+    transform:
+        translateY(-50%)
+        translateX(0);
+}}
+
+
+/* ---------------------------------
+   Compact help labels
+---------------------------------- */
+
+.dashboard-help-row {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+
+    min-height: 1.2rem;
+
+    margin-top: 0.05rem;
+    margin-bottom: 0.3rem;
+    padding: 0;
+
+    color: {theme["text"]["muted"]};
+
+    font-size: 0.68rem;
+    line-height: 1;
+}}
+
+.dashboard-help-label {{
+    color: {theme["text"]["muted"]} !important;
+
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}}
+
+.dashboard-help-group {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.85rem;
+
+    min-height: 1.25rem;
+
+    margin-top: 0.05rem;
+    margin-bottom: 0.35rem;
+    padding: 0;
+}}
+
+.dashboard-help-item {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+
+    color: {theme["text"]["muted"]};
+
+    font-size: 0.68rem;
+    line-height: 1;
+}}
+
+
 /* ---------------------------------
    Sidebar
 ---------------------------------- */
@@ -125,6 +380,7 @@ section[data-testid="stSidebar"] hr {{
     letter-spacing: -0.035em;
 }}
 
+
 /* ---------------------------------
    Filter help
 ---------------------------------- */
@@ -136,6 +392,8 @@ section[data-testid="stSidebar"] hr {{
     gap: 0.55rem;
 
     margin-bottom: 0.7rem;
+
+    overflow: visible;
 }}
 
 .filter-help-label {{
@@ -145,69 +403,6 @@ section[data-testid="stSidebar"] hr {{
     line-height: 1.35;
 }}
 
-.filter-help-tooltip {{
-    position: relative;
-
-    display: inline-flex;
-    flex-shrink: 0;
-}}
-
-.filter-help-icon {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 1.3rem;
-    height: 1.3rem;
-
-    color: {theme["text"]["secondary"]};
-    background: rgba(255, 255, 255, 0.04);
-
-    border:
-        1px solid rgba(148, 163, 184, 0.78);
-    border-radius: 999px;
-
-    font-size: 0.75rem;
-    font-weight: 850;
-
-    cursor: help;
-}}
-
-.filter-help-tooltip-text {{
-    position: absolute;
-    top: 1.7rem;
-    right: 0;
-    z-index: 999999;
-
-    width: 230px;
-    padding: 0.65rem 0.75rem;
-
-    visibility: hidden;
-    opacity: 0;
-
-    color: #172033;
-    background: #F8FAFC;
-
-    border: 1px solid #D9E2EC;
-    border-radius: 10px;
-
-    box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.28);
-
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1.45;
-
-    transition:
-        visibility 0.15s ease,
-        opacity 0.15s ease;
-}}
-
-.filter-help-tooltip:hover
-.filter-help-tooltip-text {{
-    visibility: visible;
-    opacity: 1;
-}}
 
 /* ---------------------------------
    Filter expanders
@@ -219,7 +414,8 @@ div[data-testid="stExpander"] {{
 
     margin-bottom: 0.55rem;
 
-    background: rgba(255, 255, 255, 0.025);
+    background:
+        rgba(255, 255, 255, 0.025);
 
     border:
         1px solid rgba(255, 255, 255, 0.10);
@@ -232,7 +428,8 @@ div[data-testid="stExpander"] summary {{
     padding-bottom: 0.52rem;
 
     color: {theme["text"]["primary"]};
-    background: rgba(255, 255, 255, 0.02);
+    background:
+        rgba(255, 255, 255, 0.02);
 
     font-size: 0.82rem;
     font-weight: 780;
@@ -242,6 +439,7 @@ section[data-testid="stSidebar"]
 div[data-testid="stExpanderDetails"] {{
     padding-top: 0.15rem;
 }}
+
 
 /* ---------------------------------
    Filter labels and inputs
@@ -271,9 +469,11 @@ section[data-testid="stSidebar"]
     min-height: 36px;
 
     color: {theme["text"]["primary"]};
-    background: {theme["filters"]["input_background"]};
+    background:
+        {theme["filters"]["input_background"]};
 
-    border-color: {theme["filters"]["input_border"]};
+    border-color:
+        {theme["filters"]["input_border"]};
     border-radius: 11px;
 
     font-size: 0.7rem;
@@ -286,28 +486,40 @@ section[data-testid="stSidebar"]
 
 section[data-testid="stSidebar"]
 [data-baseweb="select"] div {{
-    color: {theme["text"]["primary"]} !important;
+    color:
+        {theme["text"]["primary"]}
+        !important;
 }}
 
 section[data-testid="stSidebar"]
 [data-baseweb="select"] input {{
-    color: {theme["text"]["primary"]} !important;
+    color:
+        {theme["text"]["primary"]}
+        !important;
+
     font-size: 0.7rem !important;
 }}
 
 section[data-testid="stSidebar"]
-[data-baseweb="select"] input::placeholder {{
-    color: {theme["text"]["secondary"]} !important;
+[data-baseweb="select"]
+input::placeholder {{
+    color:
+        {theme["text"]["secondary"]}
+        !important;
+
     opacity: 0.9;
+
     font-size: 0.7rem !important;
 }}
 
 section[data-testid="stSidebar"]
 [data-baseweb="select"]:focus-within {{
-    border-color: {theme["filters"]["input_focus"]};
+    border-color:
+        {theme["filters"]["input_focus"]};
 
     box-shadow:
-        0 0 0 2px rgba(118, 199, 232, 0.15);
+        0 0 0 2px
+        rgba(118, 199, 232, 0.15);
 }}
 
 section[data-testid="stSidebar"]
@@ -316,11 +528,13 @@ section[data-testid="stSidebar"]
     row-gap: 0.25rem !important;
 }}
 
-/* Selected values */
+
+/* Selected filter values */
 
 section[data-testid="stSidebar"]
 [data-baseweb="tag"] {{
     max-width: 100% !important;
+
     min-height: 1.4rem !important;
     height: auto !important;
 
@@ -374,7 +588,8 @@ section[data-testid="stSidebar"]
     flex-shrink: 0;
 }}
 
-/* Dropdown menu */
+
+/* Dropdown menus */
 
 div[data-baseweb="popover"] {{
     z-index: 999999 !important;
@@ -387,7 +602,8 @@ ul[role="listbox"] {{
 
     background: #0C111A !important;
 
-    border: 1px solid #334155 !important;
+    border:
+        1px solid #334155 !important;
     border-radius: 11px !important;
 }}
 
@@ -416,6 +632,7 @@ div[data-baseweb="popover"]
 li[aria-selected="true"] {{
     background: #2A303D !important;
 }}
+
 
 /* ---------------------------------
    Filter summary
@@ -484,6 +701,7 @@ li[aria-selected="true"] {{
     font-size: 0.63rem;
 }}
 
+
 /* ---------------------------------
    Main dashboard header
 ---------------------------------- */
@@ -518,9 +736,11 @@ li[aria-selected="true"] {{
 
     border:
         1px solid rgba(255, 255, 255, 0.10);
-    border-radius: {theme["layout"]["radius_large"]};
+    border-radius:
+        {theme["layout"]["radius_large"]};
 
-    box-shadow: {theme["layout"]["shadow_soft"]};
+    box-shadow:
+        {theme["layout"]["shadow_soft"]};
 }}
 
 .header-row {{
@@ -546,7 +766,8 @@ li[aria-selected="true"] {{
     padding: 0.35rem 0.7rem;
 
     color: #FFFFFF;
-    background: rgba(255, 255, 255, 0.11);
+    background:
+        rgba(255, 255, 255, 0.11);
 
     border:
         1px solid rgba(255, 255, 255, 0.18);
@@ -608,7 +829,8 @@ li[aria-selected="true"] {{
     border-radius: 24px;
 
     box-shadow:
-        0 16px 34px rgba(0, 0, 0, 0.22);
+        0 16px 34px
+        rgba(0, 0, 0, 0.22);
 }}
 
 .visual-floor {{
@@ -653,10 +875,12 @@ li[aria-selected="true"] {{
             #E77761 100%
         );
 
-    border-radius: 13px 15px 9px 9px;
+    border-radius:
+        13px 15px 9px 9px;
 
     box-shadow:
-        0 7px 15px rgba(0, 0, 0, 0.22);
+        0 7px 15px
+        rgba(0, 0, 0, 0.22);
 }}
 
 .visual-car-top {{
@@ -668,7 +892,9 @@ li[aria-selected="true"] {{
     height: 12px;
 
     background: #E9EFF6;
-    border-radius: 9px 9px 3px 3px;
+
+    border-radius:
+        9px 9px 3px 3px;
 }}
 
 .visual-window {{
@@ -700,7 +926,8 @@ li[aria-selected="true"] {{
             #EF4444
         );
 
-    border-radius: 4px 4px 2px 2px;
+    border-radius:
+        4px 4px 2px 2px;
 }}
 
 .visual-wheel {{
@@ -787,6 +1014,7 @@ li[aria-selected="true"] {{
         );
 }}
 
+
 /* ---------------------------------
    Sticky tabs
 ---------------------------------- */
@@ -806,12 +1034,16 @@ li[aria-selected="true"] {{
     overflow-y: hidden;
 
     margin-bottom: 0.55rem;
-    padding: 0.48rem 0.2rem 0.3rem;
+    padding:
+        0.48rem
+        0.2rem
+        0.3rem;
 
     background:
         rgba(11, 17, 28, 0.97);
 
-    backdrop-filter: blur(14px);
+    backdrop-filter:
+        blur(14px);
 }}
 
 .stTabs [data-baseweb="tab"] {{
@@ -820,14 +1052,22 @@ li[aria-selected="true"] {{
 
     flex: 0 0 auto !important;
 
-    padding: 0.5rem 0.85rem;
+    padding:
+        0.5rem
+        0.85rem;
 
-    color: {theme["tabs"]["text"]};
-    background: {theme["tabs"]["background"]};
+    color:
+        {theme["tabs"]["text"]};
+
+    background:
+        {theme["tabs"]["background"]};
 
     border:
-        1px solid {theme["border"]["light"]};
-    border-radius: 10px 10px 0 0;
+        1px solid
+        {theme["border"]["light"]};
+
+    border-radius:
+        10px 10px 0 0;
 
     font-size: 0.72rem;
     font-weight: 780;
@@ -846,12 +1086,12 @@ li[aria-selected="true"] {{
     background:
         {theme["tabs"]["selected_background"]};
 
-    border-color:
-        {theme["tabs"]["selected_border"]};
+    # border-color:
+    #     {theme["tabs"]["selected_border"]};
 
-    box-shadow:
-        inset 0 -3px 0
-        {theme["tabs"]["selected_border"]};
+    # box-shadow:
+    #     inset 0 -3px 0
+    #     {theme["tabs"]["selected_border"]};
 }}
 
 .stTabs [data-baseweb="tab"] p {{
@@ -864,8 +1104,9 @@ li[aria-selected="true"] {{
     white-space: nowrap !important;
 }}
 
+
 /* ---------------------------------
-   Standard metric cards
+   Standard Streamlit metric cards
 ---------------------------------- */
 
 div[data-testid="stMetric"] {{
@@ -880,12 +1121,12 @@ div[data-testid="stMetric"] {{
             #F4F7FA 100%
         );
 
-    border:
-        1px solid #D9E2EC;
+    border: 1px solid #D9E2EC;
     border-radius: 12px;
 
     box-shadow:
-        0 5px 14px rgba(0, 0, 0, 0.08);
+        0 5px 14px
+        rgba(0, 0, 0, 0.08);
 }}
 
 div[data-testid="stMetric"] * {{
@@ -903,6 +1144,7 @@ div[data-testid="stMetricValue"] {{
     letter-spacing: -0.03em;
 }}
 
+
 /* ---------------------------------
    Compact section banner
 ---------------------------------- */
@@ -918,7 +1160,12 @@ div[data-testid="stMetricValue"] {{
 
     margin-top: 0.05rem;
     margin-bottom: 0.55rem;
-    padding: 0.35rem 0.85rem 0.62rem 1rem;
+
+    padding:
+        0.35rem
+        0.85rem
+        0.62rem
+        1rem;
 
     overflow: hidden;
 
@@ -931,12 +1178,14 @@ div[data-testid="stMetricValue"] {{
         );
 
     border-left:
-        4px solid {theme["brand"]["primary_muted"]};
+        4px solid
+        {theme["brand"]["primary_muted"]};
 
     border-radius: 11px;
 
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.10);
+        0 4px 12px
+        rgba(0, 0, 0, 0.10);
 }}
 
 .section-banner::after {{
@@ -969,7 +1218,9 @@ div[data-testid="stMetricValue"] {{
 .section-banner-eyebrow {{
     margin-bottom: 0.12rem;
 
-    color: {theme["brand"]["accent"]} !important;
+    color:
+        {theme["brand"]["accent"]}
+        !important;
 
     font-size: 0.56rem;
     font-weight: 850;
@@ -981,7 +1232,9 @@ div[data-testid="stMetricValue"] {{
 .section-banner-title {{
     margin: 0;
 
-    color: {theme["text"]["primary"]} !important;
+    color:
+        {theme["text"]["primary"]}
+        !important;
 
     font-size: 1.22rem;
     font-weight: 900;
@@ -992,67 +1245,59 @@ div[data-testid="stMetricValue"] {{
 .section-banner-description {{
     max-width: 1100px;
 
-    color: {theme["text"]["muted"]} !important;
+    color:
+        {theme["text"]["muted"]}
+        !important;
 
-    font-size: 0.90rem;
+    font-size: 0.9rem;
     font-weight: 500;
     line-height: 1.35;
 }}
+
 
 /* ---------------------------------
    Compact overview strip
 ---------------------------------- */
 
 .overview-strip-container {{
+    position: relative;
+
     width: 100%;
 
     margin-top: 0.15rem;
     margin-bottom: 0.6rem;
 
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: visible;
 }}
 
 .overview-strip-track {{
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 0.55rem;
 
-    min-width: max-content;
+    width: 100%;
+    min-width: 0;
 
-    padding-bottom: 0.2rem;
-
-    scrollbar-width: thin;
-    scrollbar-color:
-        rgba(148, 163, 184, 0.40)
-        transparent;
-}}
-
-.overview-strip-track::-webkit-scrollbar {{
-    height: 6px;
-}}
-
-.overview-strip-track::-webkit-scrollbar-track {{
-    background: transparent;
-}}
-
-.overview-strip-track::-webkit-scrollbar-thumb {{
-    background:
-        rgba(148, 163, 184, 0.40);
-
-    border-radius: 999px;
+    overflow: visible;
 }}
 
 .overview-strip-card {{
+    position: relative;
+
     display: flex;
-    flex: 0 0 195px;
+    flex:
+        1 1 155px;
     flex-direction: column;
     justify-content: space-between;
 
-    min-width: 195px;
+    min-width: 155px;
     min-height: 82px;
 
-    padding: 0.54rem 0.68rem;
+    padding:
+        0.54rem
+        0.68rem;
+
+    overflow: visible;
 
     background:
         linear-gradient(
@@ -1061,22 +1306,26 @@ div[data-testid="stMetricValue"] {{
             #EEE9FF 100%
         );
 
-    border: 1px solid #D8E0EA;
+    border:
+        1px solid #D8E0EA;
     border-radius: 11px;
 
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.07);
+        0 4px 12px
+        rgba(0, 0, 0, 0.07);
 }}
 
 .overview-strip-card * {{
-    color: #111827 !important;
+    color: #111827;
 }}
 
 .overview-strip-label-row {{
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 0.35rem;
+    gap: 0.3rem;
+
+    overflow: visible;
 }}
 
 .overview-strip-label {{
@@ -1091,33 +1340,32 @@ div[data-testid="stMetricValue"] {{
     text-transform: uppercase;
 }}
 
-.overview-strip-metric-help {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+.overview-strip-label-row
+.dashboard-help-icon {{
+    color: #347D9D !important;
+    background:
+        rgba(52, 125, 157, 0.08);
 
-    width: 1rem;
-    height: 1rem;
-
-    color: #475569 !important;
-    background: rgba(255, 255, 255, 0.58);
-
-    border: 1px solid rgba(100, 116, 139, 0.38);
-    border-radius: 999px;
-
-    font-size: 0.61rem;
-    font-weight: 850;
-    line-height: 1;
-
-    cursor: help;
+    border-color:
+        rgba(52, 125, 157, 0.48);
 }}
 
-.overview-strip-metric-help:hover {{
-    color: #0F172A !important;
-    background: #FFFFFF;
+.overview-strip-label-row
+.dashboard-help:hover
+.dashboard-help-icon,
+.overview-strip-label-row
+.dashboard-help:focus-within
+.dashboard-help-icon {{
+    color: #1E536A !important;
+    background:
+        rgba(52, 125, 157, 0.18);
 
-    border-color: rgba(71, 85, 105, 0.65);
+    border-color: #347D9D;
+}}
+
+.overview-strip-label-row
+.dashboard-help-popup {{
+    color: #F8FAFC !important;
 }}
 
 .overview-strip-value {{
@@ -1130,6 +1378,7 @@ div[data-testid="stMetricValue"] {{
     font-weight: 850;
     line-height: 1.15;
     letter-spacing: -0.02em;
+
     word-break: break-word;
 }}
 
@@ -1157,14 +1406,18 @@ div[data-testid="stMetricValue"] {{
 .overview-strip-badge {{
     flex-shrink: 0;
 
-    padding: 0.14rem 0.4rem;
+    padding:
+        0.14rem
+        0.4rem;
 
     color: #111827 !important;
     background:
         rgba(255, 255, 255, 0.72);
 
     border:
-        1px solid rgba(148, 163, 184, 0.25);
+        1px solid
+        rgba(148, 163, 184, 0.25);
+
     border-radius: 999px;
 
     font-size: 0.7rem;
@@ -1172,15 +1425,20 @@ div[data-testid="stMetricValue"] {{
     line-height: 1.1;
 }}
 
+
 /* ---------------------------------
    Notes and insights
 ---------------------------------- */
 
 .section-note {{
     margin-bottom: 0.75rem;
-    padding: 0.65rem 0.85rem;
+
+    padding:
+        0.65rem
+        0.85rem;
 
     color: {theme["text"]["on_card"]};
+
     background:
         linear-gradient(
             90deg,
@@ -1191,10 +1449,12 @@ div[data-testid="stMetricValue"] {{
     border-left:
         5px solid
         {theme["brand"]["primary_muted"]};
+
     border-radius: 9px;
 
     box-shadow:
-        0 2px 10px rgba(0, 0, 0, 0.05);
+        0 2px 10px
+        rgba(0, 0, 0, 0.05);
 
     font-size: 0.78rem;
     line-height: 1.42;
@@ -1202,13 +1462,18 @@ div[data-testid="stMetricValue"] {{
 
 .insight-box {{
     box-sizing: border-box;
+
     width: 100%;
 
     margin-top: 0.35rem;
-    margin-bottom: 0.72rem;
-    padding: 0.62rem 0.8rem;
+    margin-bottom: 0.55rem;
+
+    padding:
+        0.62rem
+        0.8rem;
 
     color: {theme["text"]["on_card"]};
+
     background:
         linear-gradient(
             90deg,
@@ -1219,25 +1484,32 @@ div[data-testid="stMetricValue"] {{
     border-left:
         5px solid
         {theme["semantic"]["attention"]};
+
     border-radius: 9px;
 
     box-shadow:
-        0 2px 9px rgba(0, 0, 0, 0.04);
+        0 2px 9px
+        rgba(0, 0, 0, 0.04);
 
     font-size: 0.75rem;
     line-height: 1.4;
 }}
 
 .insight-box strong {{
-    color: {theme["brand"]["primary_dark"]};
+    color:
+        {theme["brand"]["primary_dark"]};
 
     font-weight: 850;
 }}
 
 .insight-keyword {{
-    padding: 0.01rem 0.18rem;
+    padding:
+        0.01rem
+        0.18rem;
 
-    color: {theme["text"]["dark"]};
+    color:
+        {theme["text"]["dark"]};
+
     background:
         rgba(255, 209, 102, 0.28);
 
@@ -1246,97 +1518,34 @@ div[data-testid="stMetricValue"] {{
     font-weight: 850;
 }}
 
+
 /* ---------------------------------
-   Data Review Panel heading + help
+   Data Review Panel
 ---------------------------------- */
 
 .data-review-header {{
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.42rem;
 
     width: 100%;
 
     margin-top: 0.1rem;
-    margin-bottom: 0.45rem;
+    margin-bottom: 0.4rem;
+
+    overflow: visible;
 }}
 
 .data-review-title {{
-    color: {theme["text"]["primary"]} !important;
+    color:
+        {theme["text"]["primary"]}
+        !important;
 
     font-size: 1rem;
     font-weight: 820;
     line-height: 1.2;
     letter-spacing: -0.02em;
 }}
-
-.data-review-tooltip {{
-    position: relative;
-
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-}}
-
-.data-review-tooltip-icon {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 1.12rem;
-    height: 1.12rem;
-
-    color: {theme["brand"]["accent"]};
-    background:
-        rgba(118, 199, 232, 0.12);
-
-    border:
-        1px solid rgba(118, 199, 232, 0.55);
-    border-radius: 999px;
-
-    font-size: 0.68rem;
-    font-weight: 850;
-
-    cursor: help;
-}}
-
-.data-review-tooltip-text {{
-    position: absolute;
-    left: 0;
-    top: 1.55rem;
-    z-index: 999999;
-
-    width: 255px;
-    padding: 0.68rem 0.78rem;
-
-    visibility: hidden;
-    opacity: 0;
-
-    color: #172033 !important;
-    background: #F8FAFC;
-
-    border: 1px solid #D9E2EC;
-    border-radius: 10px;
-
-    box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.28);
-
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1.45;
-
-    transition:
-        visibility 0.15s ease,
-        opacity 0.15s ease;
-}}
-
-.data-review-tooltip:hover
-.data-review-tooltip-text {{
-    visibility: visible;
-    opacity: 1;
-}}
-
-/* Data Review Panel expander */
 
 .data-review-panel
 div[data-testid="stExpander"] {{
@@ -1346,7 +1555,9 @@ div[data-testid="stExpander"] {{
         rgba(255, 255, 255, 0.025);
 
     border:
-        1px solid rgba(148, 163, 184, 0.24);
+        1px solid
+        rgba(148, 163, 184, 0.24);
+
     border-radius: 12px;
 }}
 
@@ -1360,39 +1571,6 @@ div[data-testid="stExpander"] summary {{
     font-weight: 750;
 }}
 
-.mini-info-wrapper {{
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-
-    margin-bottom: 0.35rem;
-
-    color: {theme["text"]["muted"]};
-
-    font-size: 0.7rem;
-}}
-
-.mini-info {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 1rem;
-    height: 1rem;
-
-    color: {theme["brand"]["accent"]};
-    background:
-        rgba(118, 199, 232, 0.12);
-
-    border:
-        1px solid rgba(118, 199, 232, 0.35);
-    border-radius: 999px;
-
-    font-size: 0.65rem;
-    font-weight: 800;
-    cursor: help;
-}}
-
 .compact-record-note {{
     margin-top: -0.2rem;
     margin-bottom: 0.5rem;
@@ -1402,6 +1580,7 @@ div[data-testid="stExpander"] summary {{
     font-size: 0.72rem;
 }}
 
+
 /* ---------------------------------
    Dataframes and expanders
 ---------------------------------- */
@@ -1410,7 +1589,9 @@ div[data-testid="stDataFrame"] {{
     overflow: hidden;
 
     border:
-        1px solid {theme["border"]["soft"]};
+        1px solid
+        {theme["border"]["soft"]};
+
     border-radius: 12px;
 }}
 
@@ -1420,6 +1601,7 @@ div[data-testid="stExpander"] {{
 
     border-color:
         {theme["border"]["soft"]};
+
     border-radius: 12px;
 }}
 
@@ -1428,6 +1610,7 @@ div[data-testid="stExpander"] summary {{
 
     font-weight: 800;
 }}
+
 
 /* ---------------------------------
    Responsive behavior
@@ -1446,8 +1629,10 @@ div[data-testid="stExpander"] summary {{
     }}
 
     .overview-strip-card {{
-        flex: 0 0 205px;
-        min-width: 205px;
+        flex:
+            1 1 185px;
+
+        min-width: 185px;
     }}
 }}
 
@@ -1481,12 +1666,15 @@ div[data-testid="stExpander"] summary {{
     }}
 
     .overview-strip-card {{
-        flex: 0 0 185px;
+        flex:
+            1 1 165px;
 
-        min-width: 185px;
+        min-width: 165px;
         min-height: 78px;
 
-        padding: 0.5rem 0.58rem;
+        padding:
+            0.5rem
+            0.58rem;
     }}
 
     .overview-strip-value {{
@@ -1497,11 +1685,16 @@ div[data-testid="stExpander"] summary {{
         font-size: 1rem;
     }}
 
-    .data-review-tooltip-text {{
-        left: auto;
-        right: 0;
+    .dashboard-help-popup {{
+        min-width: 175px;
 
-        width: 220px;
+        max-width:
+            min(
+                235px,
+                calc(100vw - 2rem)
+            );
+
+        font-size: 0.68rem;
     }}
 }}
 </style>
@@ -1516,7 +1709,11 @@ def show_dashboard_header():
     """
     theme = get_theme()
 
-    subtitle = theme["copy"]["dashboard_subtitle"].replace(
+    subtitle = theme[
+        "copy"
+    ][
+        "dashboard_subtitle"
+    ].replace(
         "DBMS-powered public safety intelligence for ",
         ""
     )
@@ -1525,9 +1722,9 @@ def show_dashboard_header():
         '<div class="dashboard-header">'
         '<div class="header-row">'
         '<div class="header-main">'
-        '<div class="header-kicker">'
-        f'{html.escape(theme["copy"]["dashboard_label"])}'
-        '</div>'
+        # '<div class="header-kicker">'
+        # f'{html.escape(theme["copy"]["dashboard_label"])}'
+        # '</div>'
         '<h1>'
         f'{html.escape(theme["copy"]["dashboard_title"])}'
         '</h1>'
@@ -1618,15 +1815,21 @@ def show_section_banner(
     Display a compact section banner.
     """
     safe_eyebrow = html.escape(
-        str(eyebrow)
+        str(
+            eyebrow
+        )
     )
 
     safe_title = html.escape(
-        str(title)
+        str(
+            title
+        )
     )
 
     safe_description = html.escape(
-        str(description)
+        str(
+            description
+        )
     )
 
     eyebrow_html = ""
@@ -1660,19 +1863,15 @@ def show_section_banner(
 
 def show_compact_overview_strip(items):
     """
-    Display compact overview cards in one horizontal row.
+    Display compact overview cards.
 
-    Supported item properties:
-    - label: visible metric label
-    - value: visible metric value
-    - meta: optional supporting text
-    - badge: optional count or status badge
-    - numeric: whether the value should use numeric styling
-    - metric_key: optional key from METRIC_DEFINITIONS
-    - help: optional custom tooltip text
-
-    When both metric_key and help are provided, the custom help text
-    takes precedence.
+    Supported item fields:
+    - label
+    - value
+    - optional meta
+    - optional badge
+    - optional numeric
+    - optional help
     """
     cards = []
 
@@ -1713,11 +1912,7 @@ def show_compact_overview_strip(items):
             )
         )
 
-        metric_key = item.get(
-            "metric_key"
-        )
-
-        custom_help = item.get(
+        help_text = item.get(
             "help"
         )
 
@@ -1728,39 +1923,32 @@ def show_compact_overview_strip(items):
             )
         )
 
-        value_class = "overview-strip-value"
+        value_class = (
+            "overview-strip-value"
+        )
 
         if is_numeric:
             value_class += " numeric"
 
-        help_text = ""
+        help_icon_html = ""
 
-        if custom_help:
-            help_text = str(
-                custom_help
+        if help_text:
+            help_icon_html = build_help_icon(
+                help_text=help_text,
+                aria_label=(
+                    f"Help for "
+                    f"{item.get('label', 'metric')}"
+                )
             )
 
-        elif metric_key:
-            help_text = get_metric_help(
-                metric_key
-            )
-
-        safe_help_text = html.escape(
-            help_text,
-            quote=True
+        label_html = (
+            '<div class="overview-strip-label-row">'
+            '<span class="overview-strip-label">'
+            f'{label}'
+            '</span>'
+            f'{help_icon_html}'
+            '</div>'
         )
-
-        help_html = ""
-
-        if safe_help_text:
-            help_html = (
-                '<span '
-                'class="overview-strip-metric-help" '
-                f'title="{safe_help_text}" '
-                'aria-label="Metric definition">'
-                '?'
-                '</span>'
-            )
 
         badge_html = ""
 
@@ -1783,12 +1971,7 @@ def show_compact_overview_strip(items):
         card_html = (
             '<div class="overview-strip-card">'
             '<div>'
-            '<div class="overview-strip-label-row">'
-            '<div class="overview-strip-label">'
-            f'{label}'
-            '</div>'
-            f'{help_html}'
-            '</div>'
+            f'{label_html}'
             f'<div class="{value_class}">'
             f'{value}'
             '</div>'
@@ -1818,31 +2001,13 @@ def show_compact_overview_strip(items):
     )
 
 
-def show_metric_definition(
-    metric_key,
-    label="Metric definition"
-):
-    """
-    Display a compact metric-definition hint using the centralized
-    definition stored in components.metrics.
-    """
-    show_info_hint(
-        label=label,
-        help_text=get_metric_help(
-            metric_key
-        )
-    )
-
-
 def show_data_review_heading(help_text):
     """
-    Display the Data Review Panel title with a hover tooltip.
-
-    The tooltip explains that the panel is intended for inspecting
-    sample records and validating the dashboard's filtered data.
+    Display the Data Review Panel heading using the shared tooltip.
     """
-    safe_help = html.escape(
-        str(help_text)
+    help_icon_html = build_help_icon(
+        help_text=help_text,
+        aria_label="Help for Data Review Panel"
     )
 
     heading_html = (
@@ -1850,12 +2015,7 @@ def show_data_review_heading(help_text):
         '<div class="data-review-title">'
         'Data Review Panel'
         '</div>'
-        '<div class="data-review-tooltip">'
-        '<span class="data-review-tooltip-icon">?</span>'
-        '<div class="data-review-tooltip-text">'
-        f'{safe_help}'
-        '</div>'
-        '</div>'
+        f'{help_icon_html}'
         '</div>'
     )
 
@@ -1867,10 +2027,12 @@ def show_data_review_heading(help_text):
 
 def highlight_keywords(text):
     """
-    Highlight important terms in analytical insight text.
+    Highlight important analytical terms.
     """
     safe_text = html.escape(
-        str(text)
+        str(
+            text
+        )
     )
 
     keywords = [
@@ -1918,7 +2080,9 @@ def show_section_note(text):
     Display a compact explanatory note.
     """
     safe_text = html.escape(
-        str(text)
+        str(
+            text
+        )
     )
 
     note_html = (
@@ -1955,53 +2119,120 @@ def show_info_hint(
     help_text
 ):
     """
-    Display contextual help.
+    Display one compact help label using the shared tooltip.
+
+    Filter Guide uses the same tooltip implementation.
     """
     safe_label = html.escape(
-        str(label)
+        str(
+            label
+        )
     )
 
-    safe_help = html.escape(
-        str(help_text)
+    final_help_text = str(
+        help_text
     )
 
     if safe_label.lower() == "filter guide":
-        filter_help_html = (
+        final_help_text = (
+            f"{final_help_text} "
+            "Select one or more values to narrow every dashboard view. "
+            "Remove selected values with the × icon."
+        )
+
+        help_icon_html = build_help_icon(
+            help_text=final_help_text,
+            aria_label="Filter guidance"
+        )
+
+        info_html = (
             '<div class="filter-help-row">'
             '<div class="filter-help-label">'
             'Leave filters empty to include all records.'
             '</div>'
-            '<div class="filter-help-tooltip">'
-            '<span class="filter-help-icon">?</span>'
-            '<div class="filter-help-tooltip-text">'
-            f'{safe_help} '
-            'Select one or more values to narrow every dashboard view. '
-            'Remove selected values with the × icon.'
-            '</div>'
-            '</div>'
+            f'{help_icon_html}'
             '</div>'
         )
 
-        st.markdown(
-            filter_help_html,
-            unsafe_allow_html=True
+    else:
+        help_icon_html = build_help_icon(
+            help_text=final_help_text,
+            aria_label=f"Help for {label}"
         )
 
+        info_html = (
+            '<div class="dashboard-help-row">'
+            '<span class="dashboard-help-label">'
+            f'{safe_label}'
+            '</span>'
+            f'{help_icon_html}'
+            '</div>'
+        )
+
+    st.markdown(
+        info_html,
+        unsafe_allow_html=True
+    )
+
+
+def show_info_hints(items):
+    """
+    Display several related help terms in one compact horizontal row.
+
+    Each item should contain:
+    - label
+    - help
+    """
+    if not items:
         return
 
-    info_html = (
-        '<div class="mini-info-wrapper">'
-        f'<span>{safe_label}</span>'
-        '<span '
-        'class="mini-info" '
-        f'title="{safe_help}">'
-        '?'
-        '</span>'
+    item_html = []
+
+    for item in items:
+        label = item.get(
+            "label",
+            "More information"
+        )
+
+        help_text = item.get(
+            "help",
+            ""
+        )
+
+        if not help_text:
+            continue
+
+        safe_label = html.escape(
+            str(
+                label
+            )
+        )
+
+        help_icon_html = build_help_icon(
+            help_text=help_text,
+            aria_label=f"Help for {label}"
+        )
+
+        item_html.append(
+            '<span class="dashboard-help-item">'
+            '<span class="dashboard-help-label">'
+            f'{safe_label}'
+            '</span>'
+            f'{help_icon_html}'
+            '</span>'
+        )
+
+    if not item_html:
+        return
+
+    combined_html = (
+        '<div class="dashboard-help-group">'
+        f'{"".join(item_html)}'
         '</div>'
     )
 
     st.markdown(
-        info_html,
+        combined_html,
         unsafe_allow_html=True
     )
 
@@ -2011,7 +2242,9 @@ def show_compact_record_note(text):
     Display a muted note above a record table.
     """
     safe_text = html.escape(
-        str(text)
+        str(
+            text
+        )
     )
 
     note_html = (
