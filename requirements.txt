@@ -13,3 +13,9 @@ python-dotenv
 tabulate
 streamlit
 plotly
+pandas
+numpy
+requests
+beautifulsoup4
+lxml
+playwright
