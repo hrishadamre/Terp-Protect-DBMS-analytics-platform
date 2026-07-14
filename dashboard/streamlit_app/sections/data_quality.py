@@ -2,10 +2,13 @@
 data_quality.py
 
 Purpose:
-Display the pipeline reliability profile section for the Terp Protect Streamlit dashboard.
+Display the pipeline reliability profile section for the Terp Protect dashboard.
 
-This section checks whether key incident and arrest fields are valid, complete,
-and usable for reliable analysis.
+Responsibilities:
+- Summarize incident and arrest quality checks
+- Display valid and invalid record counts
+- Identify records requiring review
+- Provide collapsed diagnostic record samples
 """
 
 import pandas as pd
@@ -15,246 +18,560 @@ from components.charts import (
     create_quality_bar_chart,
     get_chart_config
 )
-
 from components.layout import (
+    show_compact_overview_strip,
     show_compact_record_note,
     show_info_hint,
     show_insight,
-    show_section_note
+    show_section_banner
 )
-
 from components.metrics import (
     format_number,
     format_percentage
 )
 
 
-def count_valid_records(data, column):
-    """Count valid records for a binary quality flag column."""
-    if data.empty or column not in data.columns:
+QUALITY_CHART_HEIGHT = 500
+
+
+def count_valid_records(
+    data,
+    column
+):
+    """
+    Count records passing a binary quality check.
+    """
+    if (
+        data.empty
+        or column not in data.columns
+    ):
         return 0
 
-    return int(data[column].fillna(0).sum())
+    values = pd.to_numeric(
+        data[column],
+        errors="coerce"
+    ).fillna(0)
+
+    return int(
+        values.sum()
+    )
 
 
-def calculate_percentage(valid_count, total_count):
-    """Calculate a safe percentage."""
+def calculate_percentage(
+    valid_count,
+    total_count
+):
+    """
+    Calculate a safe percentage.
+    """
     if total_count == 0:
-        return 0
+        return 0.0
 
     return valid_count / total_count * 100
 
 
-def get_review_records(data, quality_columns):
-    """Return records where at least one quality check failed."""
+def get_review_records(
+    data,
+    quality_columns
+):
+    """
+    Return records failing at least one available quality check.
+    """
     if data.empty:
-        return data
+        return data.copy()
 
-    available_quality_columns = [
-        column for column in quality_columns
+    available_columns = [
+        column
+        for column in quality_columns
         if column in data.columns
     ]
 
-    if not available_quality_columns:
-        return data.iloc[0:0]
+    if not available_columns:
+        return data.iloc[0:0].copy()
 
-    review_mask = pd.Series(False, index=data.index)
-
-    for column in available_quality_columns:
-        review_mask = review_mask | (data[column].fillna(0) == 0)
-
-    return data[review_mask]
-
-
-def show_data_quality(incident_data, arrest_data):
-    """Display the pipeline reliability profile section."""
-    st.subheader("Pipeline Reliability Profile")
-
-    show_section_note(
-        "Check whether key incident and arrest fields are complete, consistent, and usable for reliable analysis."
+    review_mask = pd.Series(
+        False,
+        index=data.index
     )
 
-    total_incident_records = len(incident_data)
-    total_arrest_records = len(arrest_data)
+    for column in available_columns:
+        values = pd.to_numeric(
+            data[column],
+            errors="coerce"
+        ).fillna(0)
 
-    valid_incident_case_numbers = count_valid_records(
-        incident_data,
-        "has_valid_case_number"
+        review_mask = review_mask | (
+            values == 0
+        )
+
+    return data[
+        review_mask
+    ].copy()
+
+
+def get_quality_metrics(
+    incident_data,
+    arrest_data
+):
+    """
+    Calculate all quality counts and percentages.
+    """
+    total_incidents = len(
+        incident_data
     )
 
-    valid_incident_dates = count_valid_records(
-        incident_data,
-        "has_valid_occurred_datetime"
+    total_arrests = len(
+        arrest_data
     )
 
-    valid_incident_reported_dates = count_valid_records(
-        incident_data,
-        "has_valid_reported_datetime"
-    )
+    counts = {
+        "incident_case": count_valid_records(
+            incident_data,
+            "has_valid_case_number"
+        ),
+        "incident_occurred": count_valid_records(
+            incident_data,
+            "has_valid_occurred_datetime"
+        ),
+        "incident_reported": count_valid_records(
+            incident_data,
+            "has_valid_reported_datetime"
+        ),
+        "incident_delay": count_valid_records(
+            incident_data,
+            "has_valid_reporting_delay"
+        ),
+        "arrest_number": count_valid_records(
+            arrest_data,
+            "has_valid_arrest_number"
+        ),
+        "arrest_case": count_valid_records(
+            arrest_data,
+            "has_valid_case_number"
+        ),
+        "arrest_date": count_valid_records(
+            arrest_data,
+            "has_valid_arrested_datetime"
+        ),
+        "arrest_charge": count_valid_records(
+            arrest_data,
+            "has_charge_text"
+        )
+    }
 
-    valid_reporting_delay = count_valid_records(
-        incident_data,
-        "has_valid_reporting_delay"
-    )
+    percentages = {
+        "incident_case": calculate_percentage(
+            counts["incident_case"],
+            total_incidents
+        ),
+        "incident_occurred": calculate_percentage(
+            counts["incident_occurred"],
+            total_incidents
+        ),
+        "incident_reported": calculate_percentage(
+            counts["incident_reported"],
+            total_incidents
+        ),
+        "incident_delay": calculate_percentage(
+            counts["incident_delay"],
+            total_incidents
+        ),
+        "arrest_number": calculate_percentage(
+            counts["arrest_number"],
+            total_arrests
+        ),
+        "arrest_case": calculate_percentage(
+            counts["arrest_case"],
+            total_arrests
+        ),
+        "arrest_date": calculate_percentage(
+            counts["arrest_date"],
+            total_arrests
+        ),
+        "arrest_charge": calculate_percentage(
+            counts["arrest_charge"],
+            total_arrests
+        )
+    }
 
-    valid_arrest_numbers = count_valid_records(
-        arrest_data,
-        "has_valid_arrest_number"
-    )
+    return {
+        "total_incidents": total_incidents,
+        "total_arrests": total_arrests,
+        "counts": counts,
+        "percentages": percentages
+    }
 
-    valid_arrest_case_numbers = count_valid_records(
-        arrest_data,
-        "has_valid_case_number"
-    )
 
-    valid_arrest_dates = count_valid_records(
-        arrest_data,
-        "has_valid_arrested_datetime"
-    )
+def show_quality_summary(metrics):
+    """
+    Display compact quality summary cards.
+    """
+    percentages = metrics["percentages"]
 
-    arrest_charge_text_count = count_valid_records(
-        arrest_data,
-        "has_charge_text"
-    )
+    overview_items = [
+        {
+            "label": "Incident Records",
+            "value": format_number(
+                metrics["total_incidents"]
+            ),
+            "meta": "Current filtered view",
+            "numeric": True
+        },
+        {
+            "label": "Incident Case Validity",
+            "value": format_percentage(
+                percentages["incident_case"]
+            ),
+            "meta": "Valid case numbers",
+            "numeric": True
+        },
+        {
+            "label": "Occurred Date Validity",
+            "value": format_percentage(
+                percentages["incident_occurred"]
+            ),
+            "meta": "Valid occurrence dates",
+            "numeric": True
+        },
+        {
+            "label": "Reported Date Validity",
+            "value": format_percentage(
+                percentages["incident_reported"]
+            ),
+            "meta": "Valid report dates",
+            "numeric": True
+        },
+        {
+            "label": "Delay Validity",
+            "value": format_percentage(
+                percentages["incident_delay"]
+            ),
+            "meta": "Usable delay values",
+            "numeric": True
+        },
+        {
+            "label": "Arrest Records",
+            "value": format_number(
+                metrics["total_arrests"]
+            ),
+            "meta": "Linked filtered records",
+            "numeric": True
+        },
+        {
+            "label": "Arrest Case Validity",
+            "value": format_percentage(
+                percentages["arrest_case"]
+            ),
+            "meta": "Valid case numbers",
+            "numeric": True
+        },
+        {
+            "label": "Charge Text Validity",
+            "value": format_percentage(
+                percentages["arrest_charge"]
+            ),
+            "meta": "Usable charge text",
+            "numeric": True
+        }
+    ]
 
-    incident_case_validity = calculate_percentage(
-        valid_incident_case_numbers,
-        total_incident_records
-    )
-
-    incident_date_validity = calculate_percentage(
-        valid_incident_dates,
-        total_incident_records
-    )
-
-    incident_reported_date_validity = calculate_percentage(
-        valid_incident_reported_dates,
-        total_incident_records
-    )
-
-    reporting_delay_validity = calculate_percentage(
-        valid_reporting_delay,
-        total_incident_records
-    )
-
-    arrest_number_validity = calculate_percentage(
-        valid_arrest_numbers,
-        total_arrest_records
-    )
-
-    arrest_case_validity = calculate_percentage(
-        valid_arrest_case_numbers,
-        total_arrest_records
-    )
-
-    arrest_date_validity = calculate_percentage(
-        valid_arrest_dates,
-        total_arrest_records
-    )
-
-    arrest_charge_text_validity = calculate_percentage(
-        arrest_charge_text_count,
-        total_arrest_records
-    )
-
-    card_1, card_2, card_3, card_4 = st.columns(4)
-
-    card_1.metric(
-        "Incident Records",
-        format_number(total_incident_records)
-    )
-
-    card_2.metric(
-        "Incident Case Validity",
-        format_percentage(incident_case_validity)
-    )
-
-    card_3.metric(
-        "Arrest Records",
-        format_number(total_arrest_records)
-    )
-
-    card_4.metric(
-        "Arrest Case Validity",
-        format_percentage(arrest_case_validity)
-    )
-
-    card_5, card_6, card_7, card_8 = st.columns(4)
-
-    card_5.metric(
-        "Incident Date Validity",
-        format_percentage(incident_date_validity)
-    )
-
-    card_6.metric(
-        "Reported Date Validity",
-        format_percentage(incident_reported_date_validity)
-    )
-
-    card_7.metric(
-        "Reporting Delay Validity",
-        format_percentage(reporting_delay_validity)
-    )
-
-    card_8.metric(
-        "Charge Text Validity",
-        format_percentage(arrest_charge_text_validity)
+    show_compact_overview_strip(
+        overview_items
     )
 
     show_insight(
-        f"{format_percentage(incident_case_validity)} of selected incident records have valid case numbers. "
-        f"{format_percentage(arrest_case_validity)} of selected arrest records have valid case numbers."
+        f"{format_percentage(percentages['incident_case'])} of "
+        f"selected incident records have valid case numbers, and "
+        f"{format_percentage(percentages['arrest_case'])} of selected "
+        f"arrest records have valid case numbers."
     )
 
     show_info_hint(
         "How to read quality checks",
-        "Green means the field passed the quality check. Red means the record needs review or has missing, invalid, or unusable values for that field."
+        (
+            "Valid counts passed the field-level check. Invalid counts "
+            "identify missing, inconsistent, or unusable values that "
+            "may require review."
+        )
     )
 
-    st.divider()
 
-    quality_data = {
-        "Quality Check": [
-            "Incident Valid Case Number",
-            "Incident Valid Occurred Datetime",
-            "Incident Valid Reported Datetime",
-            "Incident Valid Reporting Delay",
-            "Arrest Valid Arrest Number",
-            "Arrest Valid Case Number",
-            "Arrest Valid Arrested Datetime",
-            "Arrest Has Charge Text"
-        ],
-        "Valid Count": [
-            valid_incident_case_numbers,
-            valid_incident_dates,
-            valid_incident_reported_dates,
-            valid_reporting_delay,
-            valid_arrest_numbers,
-            valid_arrest_case_numbers,
-            valid_arrest_dates,
-            arrest_charge_text_count
-        ],
-        "Invalid Count": [
-            total_incident_records - valid_incident_case_numbers,
-            total_incident_records - valid_incident_dates,
-            total_incident_records - valid_incident_reported_dates,
-            total_incident_records - valid_reporting_delay,
-            total_arrest_records - valid_arrest_numbers,
-            total_arrest_records - valid_arrest_case_numbers,
-            total_arrest_records - valid_arrest_dates,
-            total_arrest_records - arrest_charge_text_count
-        ]
-    }
+def create_quality_dataframe(metrics):
+    """
+    Build the quality-check dataframe used by the chart.
+    """
+    counts = metrics["counts"]
+
+    total_incidents = metrics[
+        "total_incidents"
+    ]
+
+    total_arrests = metrics[
+        "total_arrests"
+    ]
+
+    return pd.DataFrame(
+        {
+            "Quality Check": [
+                "Incident Valid Case Number",
+                "Incident Valid Occurred Datetime",
+                "Incident Valid Reported Datetime",
+                "Incident Valid Reporting Delay",
+                "Arrest Valid Arrest Number",
+                "Arrest Valid Case Number",
+                "Arrest Valid Arrested Datetime",
+                "Arrest Has Charge Text"
+            ],
+            "Valid Count": [
+                counts["incident_case"],
+                counts["incident_occurred"],
+                counts["incident_reported"],
+                counts["incident_delay"],
+                counts["arrest_number"],
+                counts["arrest_case"],
+                counts["arrest_date"],
+                counts["arrest_charge"]
+            ],
+            "Invalid Count": [
+                total_incidents - counts["incident_case"],
+                total_incidents - counts["incident_occurred"],
+                total_incidents - counts["incident_reported"],
+                total_incidents - counts["incident_delay"],
+                total_arrests - counts["arrest_number"],
+                total_arrests - counts["arrest_case"],
+                total_arrests - counts["arrest_date"],
+                total_arrests - counts["arrest_charge"]
+            ]
+        }
+    )
+
+
+def show_quality_chart(metrics):
+    """
+    Display valid and invalid quality counts.
+    """
+    quality_data = create_quality_dataframe(
+        metrics
+    )
+
+    quality_chart = create_quality_bar_chart(
+        quality_data
+    )
+
+    quality_chart.update_layout(
+        height=QUALITY_CHART_HEIGHT
+    )
 
     st.plotly_chart(
-        create_quality_bar_chart(quality_data),
+        quality_chart,
         use_container_width=True,
         key="quality_summary_chart",
         config=get_chart_config()
     )
 
     show_insight(
-        "Valid records support reliable dashboard analysis. Invalid records should be reviewed before using them for operational conclusions."
+        "Quality checks with larger invalid counts should be reviewed "
+        "before those fields are used for detailed operational analysis."
+    )
+
+
+def show_review_summary(
+    incident_review_data,
+    arrest_review_data,
+    incident_total,
+    arrest_total
+):
+    """
+    Display compact review-volume cards.
+    """
+    incident_review_percentage = calculate_percentage(
+        len(incident_review_data),
+        incident_total
+    )
+
+    arrest_review_percentage = calculate_percentage(
+        len(arrest_review_data),
+        arrest_total
+    )
+
+    overview_items = [
+        {
+            "label": "Incident Records Needing Review",
+            "value": format_number(
+                len(incident_review_data)
+            ),
+            "meta": format_percentage(
+                incident_review_percentage
+            ),
+            "numeric": True
+        },
+        {
+            "label": "Arrest Records Needing Review",
+            "value": format_number(
+                len(arrest_review_data)
+            ),
+            "meta": format_percentage(
+                arrest_review_percentage
+            ),
+            "numeric": True
+        }
+    ]
+
+    show_compact_overview_strip(
+        overview_items
+    )
+
+
+def show_quality_review_panel(
+    incident_review_data,
+    arrest_review_data,
+    arrest_data
+):
+    """
+    Display collapsed incident and arrest review tables.
+    """
+    with st.expander(
+        "Records Needing Attention",
+        expanded=False
+    ):
+        show_info_hint(
+            "About this review panel",
+            (
+                "Use these samples to inspect records that failed one "
+                "or more quality checks. The tables are hidden by "
+                "default to keep the dashboard focused."
+            )
+        )
+
+        incident_tab, arrest_tab = st.tabs(
+            [
+                (
+                    "Incident review "
+                    f"({format_number(len(incident_review_data))})"
+                ),
+                (
+                    "Arrest review "
+                    f"({format_number(len(arrest_review_data))})"
+                )
+            ]
+        )
+
+        with incident_tab:
+            if incident_review_data.empty:
+                st.success(
+                    "No selected incident records require review under "
+                    "the current quality checks."
+                )
+            else:
+                show_compact_record_note(
+                    "Showing the first 25 incident records that failed "
+                    "at least one quality check."
+                )
+
+                incident_columns = [
+                    "incident_id",
+                    "case_number",
+                    "occurred_datetime",
+                    "reported_datetime",
+                    "crime_group",
+                    "disposition_group",
+                    "location_group",
+                    "has_valid_case_number",
+                    "has_valid_occurred_datetime",
+                    "has_valid_reported_datetime",
+                    "has_valid_reporting_delay"
+                ]
+
+                available_columns = [
+                    column
+                    for column in incident_columns
+                    if column in incident_review_data.columns
+                ]
+
+                st.dataframe(
+                    incident_review_data[
+                        available_columns
+                    ].head(25),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        with arrest_tab:
+            if arrest_data.empty:
+                st.info(
+                    "No arrest records are available for the selected "
+                    "incident filters."
+                )
+            elif arrest_review_data.empty:
+                st.success(
+                    "No selected arrest records require review under "
+                    "the current quality checks."
+                )
+            else:
+                show_compact_record_note(
+                    "Showing the first 25 arrest records that failed "
+                    "at least one quality check."
+                )
+
+                arrest_columns = [
+                    "arrest_id",
+                    "arrest_number",
+                    "case_number",
+                    "arrested_datetime",
+                    "charge_category",
+                    "race",
+                    "sex",
+                    "age_group",
+                    "has_valid_arrest_number",
+                    "has_valid_case_number",
+                    "has_valid_arrested_datetime",
+                    "has_charge_text"
+                ]
+
+                available_columns = [
+                    column
+                    for column in arrest_columns
+                    if column in arrest_review_data.columns
+                ]
+
+                st.dataframe(
+                    arrest_review_data[
+                        available_columns
+                    ].head(25),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+def show_data_quality(
+    incident_data,
+    arrest_data
+):
+    """
+    Display the complete pipeline reliability section.
+    """
+    show_section_banner(
+        eyebrow="",
+        title="Pipeline Reliability Profile",
+        description=(
+            "Evaluate completeness, consistency, and usability of the "
+            "incident and arrest fields supporting dashboard analysis."
+        )
+    )
+
+    metrics = get_quality_metrics(
+        incident_data,
+        arrest_data
+    )
+
+    show_quality_summary(
+        metrics
+    )
+
+    st.divider()
+
+    show_quality_chart(
+        metrics
     )
 
     incident_quality_columns = [
@@ -281,104 +598,15 @@ def show_data_quality(incident_data, arrest_data):
         arrest_quality_columns
     )
 
-    left_column, right_column = st.columns(2)
+    show_review_summary(
+        incident_review_data=incident_review_data,
+        arrest_review_data=arrest_review_data,
+        incident_total=len(incident_data),
+        arrest_total=len(arrest_data)
+    )
 
-    with left_column:
-        st.metric(
-            "Incident Records Needing Review",
-            format_number(len(incident_review_data))
-        )
-
-    with right_column:
-        st.metric(
-            "Arrest Records Needing Review",
-            format_number(len(arrest_review_data))
-        )
-
-    with st.expander("Records Needing Attention", expanded=False):
-        show_info_hint(
-            "About this review panel",
-            "Detailed records are hidden by default to keep the dashboard focused. Use this panel only when validating records that failed one or more quality checks."
-        )
-
-        review_tab_1, review_tab_2 = st.tabs(
-            [
-                f"Incident review ({format_number(len(incident_review_data))})",
-                f"Arrest review ({format_number(len(arrest_review_data))})"
-            ]
-        )
-
-        with review_tab_1:
-            incident_review_columns = [
-                "incident_id",
-                "case_number",
-                "occurred_datetime",
-                "reported_datetime",
-                "crime_group",
-                "disposition_group",
-                "location_group",
-                "has_valid_case_number",
-                "has_valid_occurred_datetime",
-                "has_valid_reported_datetime",
-                "has_valid_reporting_delay"
-            ]
-
-            available_incident_columns = [
-                column for column in incident_review_columns
-                if column in incident_review_data.columns
-            ]
-
-            if incident_review_data.empty:
-                st.success(
-                    "No selected incident records require review based on the current quality checks."
-                )
-            else:
-                show_compact_record_note(
-                    "Showing the first 25 incident records that failed at least one quality check."
-                )
-
-                st.dataframe(
-                    incident_review_data[available_incident_columns].head(25),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-        with review_tab_2:
-            arrest_review_columns = [
-                "arrest_id",
-                "arrest_number",
-                "case_number",
-                "arrested_datetime",
-                "charge_category",
-                "race",
-                "sex",
-                "age_group",
-                "has_valid_arrest_number",
-                "has_valid_case_number",
-                "has_valid_arrested_datetime",
-                "has_charge_text"
-            ]
-
-            available_arrest_columns = [
-                column for column in arrest_review_columns
-                if column in arrest_review_data.columns
-            ]
-
-            if arrest_data.empty:
-                st.info(
-                    "No arrest records are available for the selected filters."
-                )
-            elif arrest_review_data.empty:
-                st.success(
-                    "No selected arrest records require review based on the current quality checks."
-                )
-            else:
-                show_compact_record_note(
-                    "Showing the first 25 arrest records that failed at least one quality check."
-                )
-
-                st.dataframe(
-                    arrest_review_data[available_arrest_columns].head(25),
-                    use_container_width=True,
-                    hide_index=True
-                )
+    show_quality_review_panel(
+        incident_review_data,
+        arrest_review_data,
+        arrest_data
+    )

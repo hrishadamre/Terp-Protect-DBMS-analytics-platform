@@ -1,31 +1,29 @@
 """
 app.py
 
-Purpose:
-Main entry point for the Terp Protect Streamlit dashboard.
+Main Streamlit application for the Terp Protect dashboard.
 
-This file acts as the dashboard controller:
-- Loads dashboard-ready data
-- Applies sidebar filters
-- Filters related arrest records
-- Creates dashboard tabs
-- Calls each dashboard section module
-- Keeps sample records compact and low-clutter
+Responsibilities:
+- Load dashboard-ready datasets
+- Create and apply global filters
+- Filter related arrest records
+- Coordinate dashboard tabs and section modules
+- Display the compact data-review panel
 """
 
+import pandas as pd
 import streamlit as st
 
 from components.layout import (
     apply_custom_styles,
     show_compact_record_note,
     show_dashboard_header,
+    show_data_review_heading,
+    show_filter_summary,
     show_info_hint
 )
-
 from components.metrics import format_number
-
 from components.theme import get_theme
-
 from sections.arrest_analysis import show_arrest_analysis
 from sections.data_quality import show_data_quality
 from sections.executive_overview import show_executive_overview
@@ -33,7 +31,6 @@ from sections.incident_outcomes import show_incident_outcomes
 from sections.incident_trends import show_incident_trends
 from sections.location_analysis import show_location_analysis
 from sections.reporting_delay import show_reporting_delay
-
 from utils.data_loader import load_dashboard_data
 
 
@@ -45,222 +42,461 @@ st.set_page_config(
 )
 
 
-def get_month_order(data):
-    """Return month names ordered by month number."""
-    month_order = (
-        data[["occurred_month", "occurred_month_name"]]
+MONTH_ORDER = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+]
+
+
+WEEKDAY_ORDER = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+]
+
+
+ACADEMIC_PERIOD_ORDER = [
+    "Winter Break",
+    "Spring Semester",
+    "Summer Break",
+    "Fall Semester"
+]
+
+
+REPORTING_DELAY_ORDER = [
+    "Same Day / Within 24 Hours",
+    "1-3 Days",
+    "4-7 Days",
+    "Over 7 Days",
+    "Unknown"
+]
+
+
+def get_unique_values(data, column):
+    """
+    Return unique non-null values while preserving their data types.
+    """
+    if column not in data.columns:
+        return []
+
+    return (
+        data[column]
         .dropna()
         .drop_duplicates()
-        .sort_values("occurred_month")
+        .tolist()
     )
 
-    return month_order["occurred_month_name"].tolist()
+
+def get_year_options(data):
+    """
+    Return source years in descending order.
+    """
+    values = get_unique_values(
+        data,
+        "source_year"
+    )
+
+    years = []
+
+    for value in values:
+        numeric_value = pd.to_numeric(
+            value,
+            errors="coerce"
+        )
+
+        if pd.notna(numeric_value):
+            years.append(
+                int(numeric_value)
+            )
+
+    return sorted(
+        set(years),
+        reverse=True
+    )
 
 
-def filter_if_selected(data, column, selected_values):
-    """Filter a dataframe only when selected values are provided."""
+def get_ordered_options(
+    data,
+    column,
+    preferred_order=None
+):
+    """
+    Return unique values in a meaningful display order.
+    """
+    available_values = get_unique_values(
+        data,
+        column
+    )
+
+    if not available_values:
+        return []
+
+    if preferred_order is None:
+        return sorted(
+            available_values,
+            key=lambda value: str(value).lower()
+        )
+
+    ordered_values = [
+        value
+        for value in preferred_order
+        if value in available_values
+    ]
+
+    remaining_values = sorted(
+        [
+            value
+            for value in available_values
+            if value not in preferred_order
+        ],
+        key=lambda value: str(value).lower()
+    )
+
+    return ordered_values + remaining_values
+
+
+def safe_multiselect(
+    label,
+    options,
+    key
+):
+    """
+    Create a global multiselect filter.
+    """
+    return st.multiselect(
+        label=label,
+        options=options,
+        default=[],
+        key=key,
+        placeholder="All"
+    )
+
+
+def filter_if_selected(
+    data,
+    column,
+    selected_values
+):
+    """
+    Filter a dataframe only when values are selected.
+    """
     if not selected_values:
         return data
 
-    return data[data[column].isin(selected_values)]
+    if column not in data.columns:
+        return data
+
+    return data[
+        data[column].isin(selected_values)
+    ]
 
 
-def safe_multiselect(label, options, help_text):
+def show_sidebar_header():
     """
-    Create a multiselect filter.
-
-    Empty selection means all values are included.
+    Display the filter title and centralized help tooltip.
     """
-    return st.multiselect(
-        label,
-        options=options,
-        default=[],
-        help=help_text
-    )
-
-
-def show_sidebar_intro(total_records):
-    """Display a clean sidebar introduction."""
     theme = get_theme()
 
-    st.sidebar.markdown("## Filters")
-
-    show_info_hint(
-        "How filters work",
-        theme["copy"]["sidebar_filter_help"]
+    st.sidebar.markdown(
+        '<div class="sidebar-filter-heading">Filters</div>',
+        unsafe_allow_html=True
     )
 
-    st.sidebar.metric(
-        "Available Incidents",
-        format_number(total_records)
-    )
-
-    st.sidebar.divider()
+    with st.sidebar:
+        show_info_hint(
+            "Filter guide",
+            theme["copy"]["sidebar_filter_help"]
+        )
 
 
 def apply_incident_filters(data):
     """
-    Create sidebar filters for incident data and return filtered data.
-
-    UX rule:
-    - Empty filter means include all values.
-    - Selected values narrow the dashboard.
+    Create and apply all global incident filters.
     """
-    show_sidebar_intro(len(data))
+    show_sidebar_header()
 
-    month_options = get_month_order(data)
-    crime_group_options = sorted(data["crime_group"].dropna().unique().tolist())
-    disposition_options = sorted(data["disposition_group"].dropna().unique().tolist())
-    location_options = sorted(data["location_group"].dropna().unique().tolist())
-    semester_options = sorted(data["occurred_semester_period"].dropna().unique().tolist())
+    year_options = get_year_options(data)
 
-    with st.sidebar.expander("Time", expanded=True):
+    month_options = get_ordered_options(
+        data,
+        "occurred_month_name",
+        MONTH_ORDER
+    )
+
+    weekday_options = get_ordered_options(
+        data,
+        "occurred_weekday",
+        WEEKDAY_ORDER
+    )
+
+    academic_period_options = get_ordered_options(
+        data,
+        "occurred_semester_period",
+        ACADEMIC_PERIOD_ORDER
+    )
+
+    crime_group_options = get_ordered_options(
+        data,
+        "crime_group"
+    )
+
+    outcome_group_options = get_ordered_options(
+        data,
+        "disposition_group"
+    )
+
+    location_group_options = get_ordered_options(
+        data,
+        "location_group"
+    )
+
+    reporting_delay_options = get_ordered_options(
+        data,
+        "delay_bucket",
+        REPORTING_DELAY_ORDER
+    )
+
+    with st.sidebar.expander(
+        "Time",
+        expanded=True
+    ):
+        selected_years = safe_multiselect(
+            label="Year",
+            options=year_options,
+            key="filter_source_year"
+        )
+
         selected_months = safe_multiselect(
             label="Month",
             options=month_options,
-            help_text="Leave empty to include all months."
+            key="filter_month"
         )
 
-        selected_semesters = safe_multiselect(
+        selected_weekdays = safe_multiselect(
+            label="Weekday",
+            options=weekday_options,
+            key="filter_weekday"
+        )
+
+        selected_academic_periods = safe_multiselect(
             label="Academic Period",
-            options=semester_options,
-            help_text="Leave empty to include all academic periods."
+            options=academic_period_options,
+            key="filter_academic_period"
         )
 
-    with st.sidebar.expander("Incident Type", expanded=True):
+    with st.sidebar.expander(
+        "Incident Type",
+        expanded=False
+    ):
         selected_crime_groups = safe_multiselect(
             label="Crime Group",
             options=crime_group_options,
-            help_text="Leave empty to include all crime groups."
+            key="filter_crime_group"
         )
 
-        selected_dispositions = safe_multiselect(
+        selected_outcome_groups = safe_multiselect(
             label="Outcome Group",
-            options=disposition_options,
-            help_text="Leave empty to include all outcome groups."
+            options=outcome_group_options,
+            key="filter_outcome_group"
         )
 
-    with st.sidebar.expander("Location", expanded=False):
-        selected_locations = safe_multiselect(
+    with st.sidebar.expander(
+        "Location",
+        expanded=False
+    ):
+        selected_location_groups = safe_multiselect(
             label="Location Group",
-            options=location_options,
-            help_text="Leave empty to include all location groups."
+            options=location_group_options,
+            key="filter_location_group"
+        )
+
+    with st.sidebar.expander(
+        "Reporting",
+        expanded=False
+    ):
+        selected_reporting_delays = safe_multiselect(
+            label="Reporting Delay",
+            options=reporting_delay_options,
+            key="filter_reporting_delay"
         )
 
     filtered_data = data.copy()
 
-    filtered_data = filter_if_selected(
-        filtered_data,
-        "occurred_month_name",
-        selected_months
-    )
+    filter_definitions = [
+        (
+            "source_year",
+            selected_years
+        ),
+        (
+            "occurred_month_name",
+            selected_months
+        ),
+        (
+            "occurred_weekday",
+            selected_weekdays
+        ),
+        (
+            "occurred_semester_period",
+            selected_academic_periods
+        ),
+        (
+            "crime_group",
+            selected_crime_groups
+        ),
+        (
+            "disposition_group",
+            selected_outcome_groups
+        ),
+        (
+            "location_group",
+            selected_location_groups
+        ),
+        (
+            "delay_bucket",
+            selected_reporting_delays
+        )
+    ]
 
-    filtered_data = filter_if_selected(
-        filtered_data,
-        "occurred_semester_period",
-        selected_semesters
-    )
+    for column, selected_values in filter_definitions:
+        filtered_data = filter_if_selected(
+            filtered_data,
+            column,
+            selected_values
+        )
 
-    filtered_data = filter_if_selected(
-        filtered_data,
-        "crime_group",
-        selected_crime_groups
-    )
-
-    filtered_data = filter_if_selected(
-        filtered_data,
-        "disposition_group",
-        selected_dispositions
-    )
-
-    filtered_data = filter_if_selected(
-        filtered_data,
-        "location_group",
-        selected_locations
+    active_filter_count = sum(
+        bool(selected_values)
+        for _, selected_values in filter_definitions
     )
 
     st.sidebar.divider()
 
-    st.sidebar.markdown("### Current View")
-
-    st.sidebar.metric(
-        "Filtered Incidents",
-        format_number(len(filtered_data))
-    )
-
-    active_filter_count = sum(
-        [
-            bool(selected_months),
-            bool(selected_semesters),
-            bool(selected_crime_groups),
-            bool(selected_dispositions),
-            bool(selected_locations)
-        ]
-    )
-
-    st.sidebar.caption(
-        f"{active_filter_count} active filter group(s)"
-    )
+    with st.sidebar:
+        show_filter_summary(
+            total_records=len(data),
+            filtered_records=len(filtered_data),
+            active_filter_count=active_filter_count
+        )
 
     return filtered_data
 
 
-def filter_related_arrest_data(arrest_data, match_data, filtered_incident_data):
-    """Filter arrest and match datasets based on selected incident case numbers."""
+def filter_related_arrest_data(
+    arrest_data,
+    match_data,
+    filtered_incident_data
+):
+    """
+    Restrict arrest records to cases included in the current incident view.
+    """
     selected_case_numbers = (
         filtered_incident_data["case_number"]
         .dropna()
-        .unique()
+        .drop_duplicates()
         .tolist()
     )
 
     filtered_match_data = match_data[
-        match_data["case_number"].isin(selected_case_numbers)
-    ]
+        match_data["case_number"].isin(
+            selected_case_numbers
+        )
+    ].copy()
 
     matched_arrest_ids = (
         filtered_match_data["arrest_id"]
         .dropna()
-        .unique()
+        .drop_duplicates()
         .tolist()
     )
 
     filtered_arrest_data = arrest_data[
-        arrest_data["arrest_id"].isin(matched_arrest_ids)
-    ]
+        arrest_data["arrest_id"].isin(
+            matched_arrest_ids
+        )
+    ].copy()
 
-    return filtered_arrest_data, filtered_match_data
+    return (
+        filtered_arrest_data,
+        filtered_match_data
+    )
 
 
-def show_compact_data_review(incident_data, arrest_data, match_data):
+def show_compact_data_review(
+    incident_data,
+    arrest_data,
+    match_data
+):
     """
-    Display sample records in a compact review panel.
-
-    This keeps raw records available without making them dominate the dashboard.
+    Display record samples for data validation.
     """
     theme = get_theme()
 
     st.divider()
 
-    with st.expander("Data Review Panel", expanded=False):
-        show_info_hint(
-            "About this panel",
-            theme["copy"]["data_review_help"]
+    show_data_review_heading(
+        theme["copy"].get(
+            "data_review_help",
+            (
+                "Use this panel to inspect sample incident, arrest, "
+                "and matched records from the current filtered view. "
+                "It supports quick validation of the dashboard data."
+            )
         )
+    )
 
-        matched_data = match_data[match_data["has_matching_arrest"] == 1]
+    st.markdown(
+        '<div class="data-review-panel">',
+        unsafe_allow_html=True
+    )
 
-        review_tab_1, review_tab_2, review_tab_3 = st.tabs(
+    with st.expander(
+        "Open record samples",
+        expanded=False
+    ):
+        if "has_matching_arrest" in match_data.columns:
+            matched_data = match_data[
+                match_data["has_matching_arrest"] == 1
+            ].copy()
+        else:
+            matched_data = match_data[
+                match_data["arrest_id"].notna()
+            ].copy()
+
+        incident_tab, arrest_tab, match_tab = st.tabs(
             [
-                f"Incident sample ({format_number(len(incident_data))})",
-                f"Arrest sample ({format_number(len(arrest_data))})",
-                f"Matched cases ({format_number(len(matched_data))})"
+                (
+                    "Incident sample "
+                    f"({format_number(len(incident_data))})"
+                ),
+                (
+                    "Arrest sample "
+                    f"({format_number(len(arrest_data))})"
+                ),
+                (
+                    "Matched cases "
+                    f"({format_number(len(matched_data))})"
+                )
             ]
         )
 
-        with review_tab_1:
+        with incident_tab:
             show_compact_record_note(
-                "Showing the first 25 incident records from the current filtered view."
+                "Showing the first 25 incident records from "
+                "the current filtered view."
             )
 
             incident_columns = [
@@ -273,23 +509,30 @@ def show_compact_data_review(incident_data, arrest_data, match_data):
                 "report_delay_hours"
             ]
 
-            available_columns = [
-                column for column in incident_columns
+            visible_columns = [
+                column
+                for column in incident_columns
                 if column in incident_data.columns
             ]
 
             st.dataframe(
-                incident_data[available_columns].head(25),
+                incident_data[
+                    visible_columns
+                ].head(25),
                 use_container_width=True,
                 hide_index=True
             )
 
-        with review_tab_2:
+        with arrest_tab:
             if arrest_data.empty:
-                st.info("No arrest records are available for the current filter selection.")
+                st.info(
+                    "No arrest records are available for "
+                    "the current incident selection."
+                )
             else:
                 show_compact_record_note(
-                    "Showing the first 25 arrest records linked to the current filtered incident view."
+                    "Showing the first 25 arrest records linked "
+                    "to the current incident view."
                 )
 
                 arrest_columns = [
@@ -299,30 +542,36 @@ def show_compact_data_review(incident_data, arrest_data, match_data):
                     "arrested_datetime",
                     "charge_category",
                     "race",
-                    "sex",
-                    "age_group"
+                    "sex"
                 ]
 
-                available_columns = [
-                    column for column in arrest_columns
+                visible_columns = [
+                    column
+                    for column in arrest_columns
                     if column in arrest_data.columns
                 ]
 
                 st.dataframe(
-                    arrest_data[available_columns].head(25),
+                    arrest_data[
+                        visible_columns
+                    ].head(25),
                     use_container_width=True,
                     hide_index=True
                 )
 
-        with review_tab_3:
+        with match_tab:
             if matched_data.empty:
-                st.info("No matched incident-arrest records are available for the current filter selection.")
+                st.info(
+                    "No matched incident-arrest records are "
+                    "available for the current selection."
+                )
             else:
                 show_compact_record_note(
-                    "Showing the first 25 incident records with matching arrest records."
+                    "Showing the first 25 incidents with "
+                    "matching arrest records."
                 )
 
-                matched_columns = [
+                match_columns = [
                     "incident_id",
                     "case_number",
                     "occurred_datetime",
@@ -333,47 +582,45 @@ def show_compact_data_review(incident_data, arrest_data, match_data):
                     "charge_category"
                 ]
 
-                available_columns = [
-                    column for column in matched_columns
+                visible_columns = [
+                    column
+                    for column in match_columns
                     if column in matched_data.columns
                 ]
 
                 st.dataframe(
-                    matched_data[available_columns].head(25),
+                    matched_data[
+                        visible_columns
+                    ].head(25),
                     use_container_width=True,
                     hide_index=True
                 )
 
-
-def main():
-    """Run the Terp Protect Streamlit dashboard."""
-    apply_custom_styles()
-
-    dashboard_data = load_dashboard_data()
-
-    incident_data = dashboard_data["incident_data"]
-    arrest_data = dashboard_data["arrest_data"]
-    match_data = dashboard_data["match_data"]
-    charge_summary = dashboard_data["charge_summary"]
-    demographic_summary = dashboard_data["demographic_summary"]
-
-    show_dashboard_header()
-
-    filtered_incident_data = apply_incident_filters(incident_data)
-
-    if filtered_incident_data.empty:
-        st.warning(
-            "No incident records match the selected filters. Adjust the sidebar filters to continue."
-        )
-        return
-
-    filtered_arrest_data, filtered_match_data = filter_related_arrest_data(
-        arrest_data,
-        match_data,
-        filtered_incident_data
+    st.markdown(
+        '</div>',
+        unsafe_allow_html=True
     )
 
-    tab_1, tab_2, tab_3, tab_4, tab_5, tab_6, tab_7 = st.tabs(
+
+def show_dashboard_sections(
+    incident_data,
+    arrest_data,
+    match_data,
+    charge_summary,
+    demographic_summary
+):
+    """
+    Create the main navigation tabs and render each dashboard section.
+    """
+    (
+        command_tab,
+        time_tab,
+        location_tab,
+        outcome_tab,
+        delay_tab,
+        arrest_tab,
+        quality_tab
+    ) = st.tabs(
         [
             "Command Center",
             "Time Patterns",
@@ -385,39 +632,109 @@ def main():
         ]
     )
 
-    with tab_1:
-        show_executive_overview(filtered_incident_data)
+    with command_tab:
+        show_executive_overview(
+            incident_data
+        )
 
-    with tab_2:
-        show_incident_trends(filtered_incident_data)
+    with time_tab:
+        show_incident_trends(
+            incident_data
+        )
 
-    with tab_3:
-        show_location_analysis(filtered_incident_data)
+    with location_tab:
+        show_location_analysis(
+            incident_data
+        )
 
-    with tab_4:
-        show_incident_outcomes(filtered_incident_data)
+    with outcome_tab:
+        show_incident_outcomes(
+            incident_data
+        )
 
-    with tab_5:
-        show_reporting_delay(filtered_incident_data)
+    with delay_tab:
+        show_reporting_delay(
+            incident_data
+        )
 
-    with tab_6:
+    with arrest_tab:
         show_arrest_analysis(
-            filtered_arrest_data,
-            filtered_match_data,
+            arrest_data,
+            match_data,
             charge_summary,
             demographic_summary
         )
 
-    with tab_7:
+    with quality_tab:
         show_data_quality(
-            filtered_incident_data,
-            filtered_arrest_data
+            incident_data,
+            arrest_data
         )
 
-    show_compact_data_review(
-        filtered_incident_data,
+
+def main():
+    """
+    Run the Terp Protect Streamlit dashboard.
+    """
+    apply_custom_styles()
+
+    dashboard_data = load_dashboard_data()
+
+    incident_data = dashboard_data[
+        "incident_data"
+    ]
+
+    arrest_data = dashboard_data[
+        "arrest_data"
+    ]
+
+    match_data = dashboard_data[
+        "match_data"
+    ]
+
+    charge_summary = dashboard_data[
+        "charge_summary"
+    ]
+
+    demographic_summary = dashboard_data[
+        "demographic_summary"
+    ]
+
+    show_dashboard_header()
+
+    filtered_incident_data = apply_incident_filters(
+        incident_data
+    )
+
+    if filtered_incident_data.empty:
+        st.warning(
+            "No incident records match the selected filters. "
+            "Adjust the sidebar filters to continue."
+        )
+
+        return
+
+    (
         filtered_arrest_data,
         filtered_match_data
+    ) = filter_related_arrest_data(
+        arrest_data,
+        match_data,
+        filtered_incident_data
+    )
+
+    show_dashboard_sections(
+        incident_data=filtered_incident_data,
+        arrest_data=filtered_arrest_data,
+        match_data=filtered_match_data,
+        charge_summary=charge_summary,
+        demographic_summary=demographic_summary
+    )
+
+    show_compact_data_review(
+        incident_data=filtered_incident_data,
+        arrest_data=filtered_arrest_data,
+        match_data=filtered_match_data
     )
 
 

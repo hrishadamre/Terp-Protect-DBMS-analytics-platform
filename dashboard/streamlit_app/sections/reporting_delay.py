@@ -2,11 +2,13 @@
 reporting_delay.py
 
 Purpose:
-Display the reporting timeliness profile section for the Terp Protect Streamlit dashboard.
+Display the reporting timeliness profile for the Terp Protect dashboard.
 
-This section measures the time between when an incident occurred and when it was reported.
-It includes reporting delay buckets, average delay by crime group, average delay by
-location group, and high-delay records.
+Responsibilities:
+- Measure valid reporting delays
+- Summarize same-day and delayed reporting
+- Compare reporting delay across crime and location groups
+- Provide a collapsed high-delay review table
 """
 
 import pandas as pd
@@ -17,14 +19,13 @@ from components.charts import (
     create_reporting_delay_by_group_chart,
     get_chart_config
 )
-
 from components.layout import (
+    show_compact_overview_strip,
     show_compact_record_note,
     show_info_hint,
     show_insight,
-    show_section_note
+    show_section_banner
 )
-
 from components.metrics import (
     format_number,
     format_percentage,
@@ -32,187 +33,412 @@ from components.metrics import (
 )
 
 
-def show_reporting_delay(data):
-    """Display the reporting timeliness profile section."""
-    st.subheader("Reporting Timeliness Profile")
+PRIMARY_CHART_HEIGHT = 460
 
-    show_section_note(
-        "Measure the gap between incident occurrence and reporting to identify late reports, same-day reports, and data timeliness patterns."
+
+def standardize_chart_height(
+    figure,
+    height=PRIMARY_CHART_HEIGHT
+):
+    """
+    Apply consistent dimensions to paired charts.
+    """
+    figure.update_layout(
+        height=height,
+        margin={
+            "l": 58,
+            "r": 24,
+            "t": 68,
+            "b": 60
+        }
     )
 
-    valid_delay_data = data[data["has_valid_reporting_delay"] == 1]
+    return figure
 
-    avg_delay_hours = valid_delay_data["report_delay_hours"].mean()
-    avg_delay_days = valid_delay_data["report_delay_days"].mean()
 
-    same_day_count = len(
-        valid_delay_data[
-            valid_delay_data["delay_bucket"] == "Same Day / Within 24 Hours"
-        ]
+def get_valid_delay_data(data):
+    """
+    Return records with valid reporting-delay values.
+    """
+    if (
+        data.empty
+        or "has_valid_reporting_delay" not in data.columns
+    ):
+        return data.iloc[0:0].copy()
+
+    valid_flag = pd.to_numeric(
+        data["has_valid_reporting_delay"],
+        errors="coerce"
+    ).fillna(0)
+
+    return data[
+        valid_flag == 1
+    ].copy()
+
+
+def calculate_bucket_count(
+    data,
+    bucket
+):
+    """
+    Count records in a reporting-delay bucket.
+    """
+    if (
+        data.empty
+        or "delay_bucket" not in data.columns
+    ):
+        return 0
+
+    return int(
+        (
+            data["delay_bucket"] == bucket
+        ).sum()
     )
 
-    one_to_three_days_count = len(
-        valid_delay_data[
-            valid_delay_data["delay_bucket"] == "1-3 Days"
-        ]
+
+def calculate_percentage(
+    count,
+    total
+):
+    """
+    Calculate a safe percentage.
+    """
+    if total == 0:
+        return 0.0
+
+    return count / total * 100
+
+
+def format_average_delay(hours):
+    """
+    Format average reporting delay.
+    """
+    if pd.isna(hours):
+        return "N/A"
+
+    if hours < 48:
+        return f"{hours:.1f} hrs"
+
+    return f"{hours / 24:.1f} days"
+
+
+def show_delay_summary(data):
+    """
+    Display compact reporting-delay summary cards.
+    """
+    valid_delay_data = get_valid_delay_data(
+        data
     )
 
-    four_to_seven_days_count = len(
-        valid_delay_data[
-            valid_delay_data["delay_bucket"] == "4-7 Days"
-        ]
+    valid_count = len(
+        valid_delay_data
     )
 
-    over_7_days_count = len(
-        valid_delay_data[
-            valid_delay_data["delay_bucket"] == "Over 7 Days"
-        ]
+    avg_delay_hours = pd.to_numeric(
+        valid_delay_data.get(
+            "report_delay_hours",
+            pd.Series(dtype=float)
+        ),
+        errors="coerce"
+    ).mean()
+
+    same_day_count = calculate_bucket_count(
+        valid_delay_data,
+        "Same Day / Within 24 Hours"
     )
 
-    same_day_percentage = (
-        same_day_count / len(valid_delay_data) * 100
-        if len(valid_delay_data) > 0
-        else 0
+    one_to_three_count = calculate_bucket_count(
+        valid_delay_data,
+        "1-3 Days"
     )
 
-    over_7_days_percentage = (
-        over_7_days_count / len(valid_delay_data) * 100
-        if len(valid_delay_data) > 0
-        else 0
+    four_to_seven_count = calculate_bucket_count(
+        valid_delay_data,
+        "4-7 Days"
     )
 
-    card_1, card_2, card_3, card_4 = st.columns(4)
-
-    card_1.metric(
-        "Avg Delay",
-        f"{avg_delay_hours:.1f} hrs" if not pd.isna(avg_delay_hours) else "N/A"
+    over_seven_count = calculate_bucket_count(
+        valid_delay_data,
+        "Over 7 Days"
     )
 
-    card_2.metric(
-        "Avg Delay Days",
-        f"{avg_delay_days:.1f}" if not pd.isna(avg_delay_days) else "N/A"
+    same_day_percentage = calculate_percentage(
+        same_day_count,
+        valid_count
     )
 
-    card_3.metric(
-        "Same-Day Share",
-        format_percentage(same_day_percentage)
+    over_seven_percentage = calculate_percentage(
+        over_seven_count,
+        valid_count
     )
 
-    card_4.metric(
-        "Over 7 Days",
-        format_percentage(over_7_days_percentage)
+    top_delay_bucket, delay_bucket_count = get_top_value(
+        data,
+        "delay_bucket"
     )
 
-    card_5, card_6, card_7, card_8 = st.columns(4)
+    overview_items = [
+        {
+            "label": "Selected Incidents",
+            "value": format_number(
+                len(data)
+            ),
+            "meta": "Current filtered view",
+            "numeric": True
+        },
+        {
+            "label": "Valid Delay Records",
+            "value": format_number(
+                valid_count
+            ),
+            "meta": "Usable delay values",
+            "numeric": True
+        },
+        {
+            "label": "Average Delay",
+            "value": format_average_delay(
+                avg_delay_hours
+            ),
+            "meta": "Across valid records",
+            "numeric": True
+        },
+        {
+            "label": "Same-Day Share",
+            "value": format_percentage(
+                same_day_percentage
+            ),
+            "meta": f"{format_number(same_day_count)} records",
+            "numeric": True
+        },
+        {
+            "label": "Over 7 Days",
+            "value": format_percentage(
+                over_seven_percentage
+            ),
+            "meta": f"{format_number(over_seven_count)} records",
+            "numeric": True
+        },
+        {
+            "label": "Top Delay Bucket",
+            "value": top_delay_bucket,
+            "meta": "Most common range",
+            "badge": format_number(
+                delay_bucket_count
+            )
+        }
+    ]
 
-    card_5.metric(
-        "Same-Day Records",
-        format_number(same_day_count)
+    show_compact_overview_strip(
+        overview_items
     )
 
-    card_6.metric(
-        "1-3 Day Records",
-        format_number(one_to_three_days_count)
-    )
-
-    card_7.metric(
-        "4-7 Day Records",
-        format_number(four_to_seven_days_count)
-    )
-
-    card_8.metric(
-        "Over 7 Day Records",
-        format_number(over_7_days_count)
-    )
-
-    if not pd.isna(avg_delay_hours):
+    if pd.isna(avg_delay_hours):
         show_insight(
-            f"The average reporting delay is {avg_delay_hours:.1f} hours. "
-            f"{format_percentage(same_day_percentage)} of valid records were reported on the same day, "
-            f"while {format_percentage(over_7_days_percentage)} were reported over 7 days later."
+            "A valid average reporting delay is unavailable for the "
+            "current filtered selection."
         )
     else:
         show_insight(
-            "Reporting delay could not be calculated for the selected data."
+            f"The average valid reporting delay is "
+            f"{format_average_delay(avg_delay_hours)}. "
+            f"{format_percentage(same_day_percentage)} were reported "
+            f"within 24 hours, while "
+            f"{format_percentage(over_seven_percentage)} were reported "
+            f"more than seven days later."
         )
 
-    st.divider()
+    return {
+        "valid_delay_data": valid_delay_data,
+        "top_delay_bucket": top_delay_bucket,
+        "delay_bucket_count": delay_bucket_count,
+        "one_to_three_count": one_to_three_count,
+        "four_to_seven_count": four_to_seven_count
+    }
 
-    left_column, right_column = st.columns(2)
 
-    with left_column:
+def get_highest_average_group(
+    valid_delay_data,
+    group_column
+):
+    """
+    Return the group with the highest average delay.
+    """
+    required_columns = {
+        group_column,
+        "report_delay_hours"
+    }
+
+    if (
+        valid_delay_data.empty
+        or not required_columns.issubset(
+            valid_delay_data.columns
+        )
+    ):
+        return "N/A", pd.NA
+
+    grouped_delay = (
+        valid_delay_data
+        .groupby(
+            group_column
+        )["report_delay_hours"]
+        .mean()
+        .sort_values(
+            ascending=False
+        )
+    )
+
+    if grouped_delay.empty:
+        return "N/A", pd.NA
+
+    return (
+        grouped_delay.index[0],
+        grouped_delay.iloc[0]
+    )
+
+
+def show_primary_delay_charts(
+    data,
+    summary
+):
+    """
+    Display delay distribution and crime-group comparison.
+    """
+    delay_bucket_chart = standardize_chart_height(
+        create_delay_bucket_chart(
+            data
+        )
+    )
+
+    crime_delay_chart = standardize_chart_height(
+        create_reporting_delay_by_group_chart(
+            data=data,
+            group_column="crime_group",
+            title="Average Delay by Crime Group"
+        )
+    )
+
+    top_crime_group, top_crime_delay = get_highest_average_group(
+        summary["valid_delay_data"],
+        "crime_group"
+    )
+
+    chart_left, chart_right = st.columns(
+        2,
+        gap="small"
+    )
+
+    with chart_left:
         st.plotly_chart(
-            create_delay_bucket_chart(data),
+            delay_bucket_chart,
             use_container_width=True,
             key="delay_delay_bucket_chart",
             config=get_chart_config()
         )
 
-        top_delay_bucket, delay_bucket_count = get_top_value(
-            data,
-            "delay_bucket"
-        )
-
-        show_insight(
-            f"{top_delay_bucket} is the most common reporting delay bucket, with "
-            f"{format_number(delay_bucket_count)} selected records."
-        )
-
-    with right_column:
+    with chart_right:
         st.plotly_chart(
-            create_reporting_delay_by_group_chart(
-                data=data,
-                group_column="crime_group",
-                title="Average Delay by Crime Group"
-            ),
+            crime_delay_chart,
             use_container_width=True,
             key="delay_by_crime_group_chart",
             config=get_chart_config()
         )
 
-        if not valid_delay_data.empty:
-            delay_by_crime = (
-                valid_delay_data
-                .groupby("crime_group")["report_delay_hours"]
-                .mean()
-                .sort_values(ascending=False)
+    insight_left, insight_right = st.columns(
+        2,
+        gap="small"
+    )
+
+    with insight_left:
+        show_insight(
+            f"{summary['top_delay_bucket']} is the most common "
+            f"delay bucket with "
+            f"{format_number(summary['delay_bucket_count'])} records."
+        )
+
+    with insight_right:
+        if pd.isna(top_crime_delay):
+            show_insight(
+                "Average reporting delay by crime group is unavailable "
+                "for the selected records."
+            )
+        else:
+            show_insight(
+                f"{top_crime_group} has the highest average delay "
+                f"among crime groups at "
+                f"{format_average_delay(top_crime_delay)}."
             )
 
-            show_insight(
-                f"{delay_by_crime.index[0]} has the highest average reporting delay among crime groups."
-            )
+
+def show_location_delay_chart(
+    data,
+    valid_delay_data
+):
+    """
+    Display reporting delay by location group.
+    """
+    location_delay_chart = create_reporting_delay_by_group_chart(
+        data=data,
+        group_column="location_group",
+        title="Average Delay by Location Group"
+    )
+
+    location_delay_chart.update_layout(
+        height=475
+    )
 
     st.plotly_chart(
-        create_reporting_delay_by_group_chart(
-            data=data,
-            group_column="location_group",
-            title="Average Delay by Location Group"
-        ),
+        location_delay_chart,
         use_container_width=True,
         key="delay_by_location_group_chart",
         config=get_chart_config()
     )
 
-    if not valid_delay_data.empty:
-        delay_by_location = (
-            valid_delay_data
-            .groupby("location_group")["report_delay_hours"]
-            .mean()
-            .sort_values(ascending=False)
-        )
+    top_location_group, top_location_delay = get_highest_average_group(
+        valid_delay_data,
+        "location_group"
+    )
 
+    if pd.isna(top_location_delay):
         show_insight(
-            f"{delay_by_location.index[0]} has the highest average reporting delay among location groups."
+            "Average reporting delay by location group is unavailable "
+            "for the selected records."
+        )
+    else:
+        show_insight(
+            f"{top_location_group} has the highest average reporting "
+            f"delay among location groups at "
+            f"{format_average_delay(top_location_delay)}."
         )
 
-    with st.expander("High-Delay Record Review", expanded=False):
+
+def show_high_delay_review(valid_delay_data):
+    """
+    Display a collapsed table of the longest reporting delays.
+    """
+    with st.expander(
+        "High-Delay Record Review",
+        expanded=False
+    ):
         show_info_hint(
             "About this review panel",
-            "This table is hidden by default to keep the dashboard focused. Use it only when investigating records with the longest reporting delays."
+            (
+                "Use this table to inspect records with the longest "
+                "valid reporting delays. It is intended for validation "
+                "and follow-up investigation."
+            )
         )
 
+        if valid_delay_data.empty:
+            st.info(
+                "No valid reporting-delay records are available for "
+                "the selected filters."
+            )
+
+            return
+
         show_compact_record_note(
-            "Showing the top 25 records with the longest valid reporting delays in the current filtered view."
+            "Showing the 25 records with the longest valid reporting "
+            "delays in the current filtered view."
         )
 
         delay_columns = [
@@ -228,17 +454,54 @@ def show_reporting_delay(data):
         ]
 
         available_columns = [
-            column for column in delay_columns
+            column
+            for column in delay_columns
             if column in valid_delay_data.columns
         ]
 
-        if valid_delay_data.empty:
-            st.info("No valid reporting-delay records are available for the selected filters.")
-        else:
-            st.dataframe(
-                valid_delay_data[available_columns]
-                .sort_values("report_delay_hours", ascending=False)
-                .head(25),
-                use_container_width=True,
-                hide_index=True
+        st.dataframe(
+            valid_delay_data[
+                available_columns
+            ]
+            .sort_values(
+                "report_delay_hours",
+                ascending=False
             )
+            .head(25),
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+def show_reporting_delay(data):
+    """
+    Display the complete reporting-timeliness section.
+    """
+    show_section_banner(
+        eyebrow="",
+        title="Reporting Timeliness Profile",
+        description=(
+            "Measure how quickly incidents are reported and identify "
+            "same-day reports, late reports, and high-delay patterns."
+        )
+    )
+
+    summary = show_delay_summary(
+        data
+    )
+
+    st.divider()
+
+    show_primary_delay_charts(
+        data,
+        summary
+    )
+
+    show_location_delay_chart(
+        data,
+        summary["valid_delay_data"]
+    )
+
+    show_high_delay_review(
+        summary["valid_delay_data"]
+    )
