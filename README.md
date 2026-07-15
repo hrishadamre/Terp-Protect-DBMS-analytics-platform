@@ -330,7 +330,7 @@ Enables users to filter records and compare patterns across time, locations, out
 <td>Field definitions, standardized categories, metric rules, and matching logic.</td>
 </tr>
 <tr>
-<td><a href="docs/Terp_Protect_Business_Analysis_Report.pdf"><b>Business Analysis Report</b></a></td>
+<td><a href="reports/Terp_Protect_Business_Analysis_Report.pdf"><b>Business Analysis Report</b></a></td>
 <td>Project motivation, user needs, objectives, solution, impact, and future direction.</td>
 </tr>
 </table>
