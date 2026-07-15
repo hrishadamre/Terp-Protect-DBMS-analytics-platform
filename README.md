@@ -1,240 +1,347 @@
-# Terp Protect: Campus Safety Analytics & Incident Intelligence DBMS
-## Overview
-Terp Protect is a database and analytics project focused on organizing, modeling, and analyzing public safety records from the University of Maryland Police Department. The project uses publicly available UMPD records to build a structured data pipeline, relational database, SQL analysis layer, and interactive Streamlit dashboard.
-The project began as a DBMS course assignment using synthetic data modeled after UMPD arrest log structures. This version rebuilds and expands the work using real public data sources, with a stronger focus on data extraction, data cleaning, database design, SQL analytics, dashboarding, and responsible future predictive analytics.
-## Objective
-The objective is to transform separate public safety records into a centralized analytics database that can help answer questions such as:
-- What types of incidents are most commonly reported?
-- Which locations have higher incident activity?
-- How do incident volumes vary by month, weekday, and time of day?
-- Which incidents are arrest-related?
-- What are the most common case outcome categories?
-- How long does it take for incidents to be reported?
-- How can public safety records be structured for consistent reporting and analysis?
-## Current Project Scope
-The current version focuses on the first completed data pipeline:
-- Source: UMPD Daily Crime and Incident Logs
-- Year: 2025
-- Records collected: 1,886 incidents
-- Main output: Cleaned incident dataset, SQLite database, SQL analysis outputs, and Streamlit dashboard
-Additional UMPD data sources such as Arrest Logs, Campus Security Authority Logs, and Uniform Crime Reports are planned for future phases.
-## Data Sources
-The project is designed around publicly available UMPD data sources:
-- Daily Crime and Incident Logs
-- Arrest Logs
-- Campus Security Authority Logs
-- Uniform Crime Reports
-- Official UMPD Dashboard, used as a reference and benchmark
-The first implemented source is the 2025 Daily Crime and Incident Logs. Other sources will be added after the current incident-level pipeline is finalized.
-## Key Improvements
-This project extends basic public reporting by adding:
-- Centralized relational database design
-- Automated data extraction from public web pages
-- Cleaned and standardized incident records
-- SQL-based business analysis
-- Reporting delay analysis
-- Disposition and incident outcome analysis
-- Location and time-based incident analysis
-- Data quality checks
-- Dashboard-ready analytical exports
-- Interactive Streamlit dashboard
-- Future support for arrest matching, forecasting, and charge text classification
-## Project Architecture
-```text
-terp-protect-dbms/
-├── archive/
-│   ├── original_assignment/
-│   └── screenshots/
-├── dashboard/
-│   ├── powerbi/
-│   │   └── data/
-│   └── streamlit_app/
-│       ├── README.md
-│       └── app.py
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── database/
-├── notebooks/
-├── reports/
-│   ├── data_dictionary.md
-│   ├── data_source_inventory.md
-│   ├── dashboard_design_plan.md
-│   ├── daily_incident_cleaning_summary_2025.md
-│   ├── improvement_over_official_dashboard.md
-│   ├── project_roadmap.md
-│   ├── sql_analysis_summary_2025.md
-│   └── sql_outputs/
-├── sql/
-│   ├── 01_schema.sql
-│   ├── 02_views.sql
-│   ├── 03_business_questions.sql
-│   └── 04_data_quality_checks.sql
-├── src/
-│   ├── analysis/
-│   │   ├── export_dashboard_data.py
-│   │   └── run_business_analysis.py
-│   ├── extract/
-│   │   └── scrape_daily_logs.py
-│   ├── load/
-│   │   └── build_database.py
-│   ├── models/
-│   ├── transform/
-│   │   └── clean_daily_incidents.py
-│   └── utils/
-├── visuals/
-├── .gitignore
-├── README.md
-└── requirements.txt
-```
-## Workflow
-The project follows a staged data workflow:
-1. Review and document available UMPD data sources
-2. Scrape public Daily Crime and Incident Log records
-3. Save raw records as CSV
-4. Clean and standardize raw fields
-5. Create derived analytical fields
-6. Design and build a relational SQLite database
-7. Load cleaned records into fact and dimension tables
-8. Create SQL views for business analysis
-9. Run SQL analysis queries and export results
-10. Export dashboard-ready datasets
-11. Build an interactive Streamlit dashboard
-## Current Data Pipeline
-```text
-UMPD public web pages
-→ Python scraping script
-→ raw CSV
-→ cleaning and standardization script
-→ processed CSV
-→ SQLite database
-→ SQL views and business queries
-→ dashboard-ready CSV exports
-→ Streamlit dashboard
-```
-## Database Design
-The current database uses a simple star-schema structure for incident analytics.
-Current tables:
-- `fact_incident`
-- `dim_date`
-- `dim_crime_type`
-- `dim_disposition`
-- `dim_location`
-Planned future tables:
-- `fact_arrest`
-- `fact_csa_incident`
-- `fact_monthly_crime_report`
-- `dim_demographic`
-- `dim_charge_category`
-- `bridge_arrest_charge`
-## Analysis Areas
-The current version supports analysis in the following areas:
-- Incident volume trends
-- Crime type distribution
-- Location-based incident patterns
-- Disposition and case outcome analysis
-- Reporting delay analysis
-- Arrest-related incident percentage
-- Month, weekday, hour, and academic-period trends
-- Data quality and completeness checks
-## Streamlit Dashboard
-The Streamlit dashboard provides an interactive local UI for exploring the cleaned and modeled incident data.
-Current dashboard tabs:
-- Executive Overview
-- Incident Trends
-- Incident Outcomes
-- Reporting Delay
-- Location Analysis
-- Data Quality
-To run the dashboard:
-```bash
-streamlit run dashboard/streamlit_app/app.py
-```
-If needed, use:
-```bash
-python3 -m streamlit run dashboard/streamlit_app/app.py
-```
-## How to Run This Project
-### 1. Install dependencies
-```bash
-python3 -m pip install -r requirements.txt
-```
-### 2. Scrape Daily Crime and Incident Logs
-```bash
-python3 src/extract/scrape_daily_logs.py
-```
-Output:
-```text
-data/raw/daily_incident_logs_2025.csv
-```
-### 3. Clean the raw incident data
-```bash
-python3 src/transform/clean_daily_incidents.py
-```
-Outputs:
-```text
-data/processed/clean_daily_incidents_2025.csv
-reports/daily_incident_cleaning_summary_2025.md
-```
-### 4. Build and load the SQLite database
-```bash
-python3 src/load/build_database.py
-```
-Output:
-```text
-data/database/terp_protect.db
-```
-### 5. Run SQL analysis outputs
-```bash
-python3 src/analysis/run_business_analysis.py
-```
-Outputs:
-```text
-reports/sql_outputs/
-reports/sql_analysis_summary_2025.md
-```
-### 6. Export dashboard-ready data
-```bash
-python3 src/analysis/export_dashboard_data.py
-```
-Output:
-```text
-dashboard/powerbi/data/
-```
-### 7. Launch the Streamlit dashboard
-```bash
-streamlit run dashboard/streamlit_app/app.py
-```
-## Important Files
-| File | Purpose |
-|---|---|
-| `src/extract/scrape_daily_logs.py` | Scrapes 2025 UMPD Daily Crime and Incident Logs |
-| `src/transform/clean_daily_incidents.py` | Cleans raw incident data and creates derived fields |
-| `src/load/build_database.py` | Builds and loads the SQLite database |
-| `src/analysis/run_business_analysis.py` | Runs SQL-based business analysis queries |
-| `src/analysis/export_dashboard_data.py` | Exports dashboard-ready CSV files |
-| `sql/01_schema.sql` | Defines the core database schema |
-| `sql/02_views.sql` | Creates reusable SQL views |
-| `sql/03_business_questions.sql` | Contains analytical SQL questions |
-| `dashboard/streamlit_app/app.py` | Main Streamlit dashboard application |
-| `reports/data_source_inventory.md` | Documents source datasets and planned scope |
-| `reports/data_dictionary.md` | Documents raw, cleaned, and modeled fields |
-| `reports/project_roadmap.md` | Describes the staged project roadmap |
-## Tools and Technologies
-- Python
-- Pandas
-- BeautifulSoup
-- Requests
-- SQL
-- SQLite
-- Plotly
-- Streamlit
-- Jupyter Notebook
-- VS Code
-- Git and GitHub
-- Power BI, planned as a later reporting layer
-## Notes on Data and Ethics
-This project uses public records for educational and analytical purposes. It does not attempt to predict individual behavior, assign risk to individuals, or make enforcement decisions.
-Future predictive work, if included, will focus only on aggregate-level reporting support, administrative outcome classification, incident volume forecasting, or charge text categorization.
-## Project Background
-This project began as a DBMS course assignment called Terp Protect. The original assignment used synthetic data based on the structure of UMPD arrest logs. The current version rebuilds the project using real public data and expands it into a full analytics pipeline with data collection, cleaning, relational modeling, SQL analysis, and dashboarding.
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=rect&height=170&color=0:111827,55:7F1D1D,100:C8102E&text=Terp%20Protect&fontColor=FFFFFF&fontSize=42&fontAlignY=40&desc=Campus%20Public%20Safety%20Data%20Management%20and%20Analytics%20Platform&descAlignY=69&descSize=15" alt="Terp Protect banner" />
+</p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Inter&weight=500&size=19&duration=3600&pause=900&color=CBD5E1&center=true&vCenter=true&width=900&lines=Transforming+fragmented+public+safety+records+into+structured+insights.;Connecting+incident%2C+arrest%2C+location%2C+outcome%2C+and+reporting+data.;Supporting+clearer+analysis%2C+consistent+reporting%2C+and+better+decision-making." alt="Terp Protect summary" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-Data%20Pipeline-7F1D1D?style=for-the-badge&logo=python&logoColor=FFFFFF&labelColor=111827" alt="Python data pipeline" />
+  <img src="https://img.shields.io/badge/SQLite-Relational%20Database-7F1D1D?style=for-the-badge&logo=sqlite&logoColor=FFFFFF&labelColor=111827" alt="SQLite database" />
+  <img src="https://img.shields.io/badge/SQL-Analytical%20Views-991B1B?style=for-the-badge&logo=postgresql&logoColor=FFFFFF&labelColor=111827" alt="SQL analytical views" />
+  <img src="https://img.shields.io/badge/Streamlit-Interactive%20Dashboard-991B1B?style=for-the-badge&logo=streamlit&logoColor=FFFFFF&labelColor=111827" alt="Streamlit dashboard" />
+</p>
+
+<h2>Project Overview</h2>
+<p><b>Terp Protect</b> organizes public UMPD incident and arrest records into one clear system. It helps users quickly explore campus safety patterns, reporting delays, case outcomes, arrest activity, and data quality through an interactive dashboard.</p>
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<h3>Problem</h3>
+Public records are fragmented, inconsistently categorized, and difficult to compare across years.
+</td>
+<td width="33%" valign="top">
+<h3>Solution</h3>
+A repeatable workflow that cleans, organizes, connects, validates, and analyzes incident and arrest data.
+</td>
+<td width="33%" valign="top">
+<h3>Value</h3>
+Faster analysis, clearer reporting, consistent definitions, and improved visibility into campus safety patterns.
+</td>
+</tr>
+</table>
+
+<br>
+
+<h2>Why This Project Matters</h2>
+
+<p>Campus public-safety records contain information that can support operational planning, reporting, resource prioritization, and public awareness. However, raw records alone do not provide a complete or easily understandable view.</p>
+
+<p>Terp Protect converts these records into an organized decision-support system that helps users answer questions such as:</p>
+
+<ul>
+<li>Which incident categories occur most frequently?</li>
+<li>Where is public-safety activity concentrated?</li>
+<li>When do incident volumes increase?</li>
+<li>How quickly are incidents reported?</li>
+<li>What proportion of cases are closed, pending, or arrest-related?</li>
+<li>How many incident records can be connected to arrest records?</li>
+<li>Which records require additional data-quality review?</li>
+</ul>
+
+<br>
+
+<h2>Dashboard Preview</h2>
+
+<p align="center">
+  <img src="visuals/UI screenshots/dashboard_capture_20260714_182842/01_command_center.png" width="95%" alt="Terp Protect dashboard preview" />
+</p>
+
+<br>
+
+<h2>Platform Capabilities</h2>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>Data Consolidation</h3>
+Combines multiple years of public incident and arrest records into a consistent analytical structure.
+</td>
+<td width="50%" valign="top">
+<h3>Category Standardization</h3>
+Groups inconsistent source descriptions into reusable crime, location, disposition, and charge categories.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3>Incident-to-Arrest Matching</h3>
+Connects related records using standardized case numbers while preserving unmatched records for transparency.
+</td>
+<td width="50%" valign="top">
+<h3>Reporting-Delay Analysis</h3>
+Measures how quickly incidents are reported using elapsed-time calculations, medians, percentiles, and delay groups.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3>Data Quality Review</h3>
+Identifies missing identifiers, invalid timestamps, unusable reporting sequences, and incomplete arrest information.
+</td>
+<td width="50%" valign="top">
+<h3>Interactive Exploration</h3>
+Enables users to filter records and compare patterns across time, locations, outcomes, crime groups, and arrests.
+</td>
+</tr>
+</table>
+
+<br>
+
+<h2>Dashboard Sections</h2>
+
+<table>
+<tr>
+<th>Section</th>
+<th>Purpose</th>
+</tr>
+<tr>
+<td><b>Command Center</b></td>
+<td>Summarizes the most important incident, location, outcome, reporting, and arrest-linkage measures.</td>
+</tr>
+<tr>
+<td><b>Time and Seasonality</b></td>
+<td>Examines activity across calendar months, academic periods, weekdays, and hours.</td>
+</tr>
+<tr>
+<td><b>Location Analysis</b></td>
+<td>Identifies high-activity locations and compares incident composition across standardized location groups.</td>
+</tr>
+<tr>
+<td><b>Incident Outcomes</b></td>
+<td>Shows how cases are distributed across closed, pending, arrest-related, and other outcomes.</td>
+</tr>
+<tr>
+<td><b>Reporting Delay</b></td>
+<td>Measures how quickly incidents are reported and highlights categories with longer delays.</td>
+</tr>
+<tr>
+<td><b>Arrest Analysis</b></td>
+<td>Compares cleaned and linked arrest records, charge categories, and incident-match coverage.</td>
+</tr>
+<tr>
+<td><b>Data Quality</b></td>
+<td>Displays field-level validation results and records requiring further review.</td>
+</tr>
+</table>
+
+<br>
+
+<h2>Key Findings</h2>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>Incident Activity</h3>
+<ul>
+<li><b>Medical / Welfare</b> is the largest standardized incident category.</li>
+<li><b>Roadway / Street</b> records the highest incident volume among location groups.</li>
+<li>The highest combined seasonal activity occurs during the fall period.</li>
+</ul>
+</td>
+<td width="50%" valign="top">
+<h3>Case Outcomes</h3>
+<ul>
+<li>Approximately <b>49.4%</b> of incidents are categorized as closed or cleared.</li>
+<li>Approximately <b>29.8%</b> remain pending or active.</li>
+<li>Approximately <b>16.5%</b> have an arrest-related disposition.</li>
+</ul>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3>Reporting Timeliness</h3>
+<ul>
+<li>Approximately <b>81.8%</b> of valid records were reported within 24 hours.</li>
+<li>The median reporting delay is approximately <b>0.2 hours</b>.</li>
+<li>The 90th-percentile delay is approximately <b>3.9 days</b>.</li>
+</ul>
+</td>
+<td width="50%" valign="top">
+<h3>Arrest Linkage and Quality</h3>
+<ul>
+<li>Approximately <b>17.3%</b> of incidents are linked to at least one arrest.</li>
+<li><b>DUI / Impaired Driving</b> is the largest arrest charge category.</li>
+<li>The primary field-check pass rate is approximately <b>99.94%</b>.</li>
+</ul>
+</td>
+</tr>
+</table>
+
+<p>Detailed interpretation is available in the <a href="reports/analytical_summary.md"><b>Analytical Summary</b></a>.</p>
+
+<br>
+
+<h2>How the System Works</h2>
+
+<table>
+<tr>
+<td align="center"><b>1. Collect</b><br><sub>Load public incident and arrest records</sub></td>
+<td align="center">→</td>
+<td align="center"><b>2. Clean</b><br><sub>Correct formats and standardize values</sub></td>
+<td align="center">→</td>
+<td align="center"><b>3. Organize</b><br><sub>Store records in a relational database</sub></td>
+</tr>
+<tr>
+<td align="center"><b>6. Present</b><br><sub>Deliver interactive dashboard views</sub></td>
+<td align="center">←</td>
+<td align="center"><b>5. Analyze</b><br><sub>Create reusable calculations and summaries</sub></td>
+<td align="center">←</td>
+<td align="center"><b>4. Connect</b><br><sub>Link incidents and arrests by case number</sub></td>
+</tr>
+</table>
+
+<br>
+
+<h2>Business Analysis Approach</h2>
+
+<details open>
+<summary><b>Understanding the problem</b></summary>
+<br>
+<p>The first challenge was not simply creating charts. It was understanding why the records were difficult to use and identifying the decisions the final system should support.</p>
+<ul>
+<li>Reviewed the structure and inconsistencies of incident and arrest records.</li>
+<li>Identified repeated analytical questions across time, location, outcomes, reporting delays, and arrests.</li>
+<li>Defined clear terminology so that dashboard measures would remain consistent.</li>
+<li>Separated descriptive insight from assumptions about risk or causation.</li>
+</ul>
+</details>
+
+<details>
+<summary><b>Translating needs into requirements</b></summary>
+<br>
+<ul>
+<li>Users should be able to filter the same dataset across all analytical views.</li>
+<li>Incident counts should use distinct records and avoid duplicate inflation.</li>
+<li>Reporting-delay calculations should exclude impossible or unusable values.</li>
+<li>Incident outcomes and arrest-record linkage should remain separate measures.</li>
+<li>Records failing quality checks should remain visible instead of being silently removed.</li>
+<li>The dashboard should explain important calculations using concise help text.</li>
+</ul>
+</details>
+
+<details>
+<summary><b>Designing for practical use</b></summary>
+<br>
+<p>The final design prioritizes clarity, consistency, and traceability. Each dashboard section answers a focused group of questions, while the Command Center provides a quick overview of the complete dataset.</p>
+<p>Detailed technical definitions are kept outside the main interface in the data dictionary and supporting documentation, allowing the dashboard to remain understandable without removing analytical rigor.</p>
+</details>
+
+<br>
+
+<h2>Tools and Methods</h2>
+
+<table>
+<tr>
+<td><b>Data preparation</b></td>
+<td>Python · Pandas · Data cleaning · Validation · Category standardization</td>
+</tr>
+<tr>
+<td><b>Database and querying</b></td>
+<td>SQLite · SQL · Relational modeling · Joins · Aggregations · Analytical views</td>
+</tr>
+<tr>
+<td><b>Dashboard and visualization</b></td>
+<td>Streamlit · Plotly · Interactive filters · Data tables</td>
+</tr>
+<tr>
+<td><b>Business analysis</b></td>
+<td>Problem framing · Requirements definition · Metric design · Process mapping · Insight communication</td>
+</tr>
+</table>
+
+<br>
+<h2>Project Structure</h2>
+
+    TERP PROTECT/
+    │
+    ├── dashboard/
+    │   └── streamlit_app/
+    │       ├── utils/
+    │       ├── components/
+    │       ├── sections/
+    │       ├── app.py
+    │       └── README.md
+    │
+    ├── data/
+    │   ├── database/
+    │   ├── processed/
+    │   └── raw/
+    │
+    ├── reports/
+    │   ├── sql_outputs/
+    │   ├── analytical_summary.md
+    │   ├── arrest_log_cleaning_summary_2023_2025.md
+    │   ├── daily_incident_cleaning_summary_2023_2025.md
+    │   ├── data_dictionary.md
+    │   ├── improvement_over_official_dashboard.md
+    │   └── sql_analysis_summary_2023_2025.md
+    │
+    ├── sql/
+    │   ├── 01_schema.sql
+    │   ├── 02_views.sql
+    │   └── 03_business_questions.sql
+    │
+    ├── src/
+    │   ├── analysis/
+    │   ├── extract/
+    │   ├── load/
+    │   └── transform/
+    │
+    ├── visuals/
+    │   ├── UI screenshots/
+    │   └── capture_dashboard_screenshots.py
+    │
+    ├── .gitignore
+    ├── README.md
+    ├── requirements.txt
+    ├── run_pipeline.py
+    └── SETUP.md
+    
+
+<h2>Run the Project</h2>
+
+<p>Complete installation and execution instructions are available in <a href="SETUP.md"><b>SETUP.md</b></a>.</p>
+
+<br>
+
+<h2>Documentation</h2>
+
+<table>
+<tr>
+<td><a href="SETUP.md"><b>Setup and Execution Guide</b></a></td>
+<td>Installation, pipeline execution, dashboard launch, and troubleshooting.</td>
+</tr>
+<tr>
+<td><a href="reports/analytical_summary.md"><b>Analytical Summary</b></a></td>
+<td>Key findings, interpretations, limitations, and responsible-use notes.</td>
+</tr>
+<tr>
+<td><a href="reports/data_dictionary.md"><b>Data Dictionary</b></a></td>
+<td>Field definitions, standardized categories, metric rules, and matching logic.</td>
+</tr>
+<tr>
+<td><a href="docs/Terp_Protect_Business_Analysis_Report.pdf"><b>Business Analysis Report</b></a></td>
+<td>Project motivation, user needs, objectives, solution, impact, and future direction.</td>
+</tr>
+</table>
+
+<br>
+
+<h2>Responsible Use</h2>
+
+<p>Terp Protect is designed for descriptive reporting, operational review, data validation, and educational analysis.</p>
+
+<p>The platform does not predict individual behavior, assign personal risk scores, support automated enforcement decisions, or establish causal relationships from descriptive data.</p>
+
+<p>Incident counts should not be interpreted as population-adjusted risk rates. Higher activity may reflect greater traffic, exposure, reporting behavior, physical size, or operational visibility.</p>
