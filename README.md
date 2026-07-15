@@ -33,7 +33,7 @@ Faster analysis, clearer reporting, consistent definitions, and improved visibil
 </tr>
 </table>
 
-<br>
+ 
 
 <h2>Why This Project Matters</h2>
 
@@ -51,7 +51,7 @@ Faster analysis, clearer reporting, consistent definitions, and improved visibil
 <li>Which records require additional data-quality review?</li>
 </ul>
 
-<br>
+ 
 
 <h2>Dashboard Preview</h2>
 
@@ -59,7 +59,7 @@ Faster analysis, clearer reporting, consistent definitions, and improved visibil
   <img src="visuals/UI screenshots/dashboard_capture_20260714_182842/01_command_center.png" width="95%" alt="Terp Protect dashboard preview" />
 </p>
 
-<br>
+ 
 
 <h2>Platform Capabilities</h2>
 
@@ -96,7 +96,7 @@ Enables users to filter records and compare patterns across time, locations, out
 </tr>
 </table>
 
-<br>
+ 
 
 <h2>Dashboard Sections</h2>
 
@@ -135,7 +135,7 @@ Enables users to filter records and compare patterns across time, locations, out
 </tr>
 </table>
 
-<br>
+ 
 
 <h2>Key Findings</h2>
 
@@ -180,7 +180,7 @@ Enables users to filter records and compare patterns across time, locations, out
 
 <p>Detailed interpretation is available in the <a href="reports/analytical_summary.md"><b>Analytical Summary</b></a>.</p>
 
-<br>
+ 
 
 <h2>How the System Works</h2>
 
@@ -201,13 +201,13 @@ Enables users to filter records and compare patterns across time, locations, out
 </tr>
 </table>
 
-<br>
+ 
 
 <h2>Business Analysis Approach</h2>
 
 <details open>
 <summary><b>Understanding the problem</b></summary>
-<br>
+ 
 <p>The first challenge was not simply creating charts. It was understanding why the records were difficult to use and identifying the decisions the final system should support.</p>
 <ul>
 <li>Reviewed the structure and inconsistencies of incident and arrest records.</li>
@@ -219,7 +219,7 @@ Enables users to filter records and compare patterns across time, locations, out
 
 <details>
 <summary><b>Translating needs into requirements</b></summary>
-<br>
+ 
 <ul>
 <li>Users should be able to filter the same dataset across all analytical views.</li>
 <li>Incident counts should use distinct records and avoid duplicate inflation.</li>
@@ -232,12 +232,12 @@ Enables users to filter records and compare patterns across time, locations, out
 
 <details>
 <summary><b>Designing for practical use</b></summary>
-<br>
+ 
 <p>The final design prioritizes clarity, consistency, and traceability. Each dashboard section answers a focused group of questions, while the Command Center provides a quick overview of the complete dataset.</p>
 <p>Detailed technical definitions are kept outside the main interface in the data dictionary and supporting documentation, allowing the dashboard to remain understandable without removing analytical rigor.</p>
 </details>
 
-<br>
+ 
 
 <h2>Tools and Methods</h2>
 
@@ -260,7 +260,7 @@ Enables users to filter records and compare patterns across time, locations, out
 </tr>
 </table>
 
-<br>
+ 
 <h2>Project Structure</h2>
 
     TERP PROTECT/
@@ -313,7 +313,7 @@ Enables users to filter records and compare patterns across time, locations, out
 
 <p>Complete installation and execution instructions are available in <a href="SETUP.md"><b>SETUP.md</b></a>.</p>
 
-<br>
+ 
 
 <h2>Documentation</h2>
 
@@ -336,7 +336,7 @@ Enables users to filter records and compare patterns across time, locations, out
 </tr>
 </table>
 
-<br>
+ 
 
 <h2>Responsible Use</h2>
 
@@ -345,3 +345,16 @@ Enables users to filter records and compare patterns across time, locations, out
 <p>The platform does not predict individual behavior, assign personal risk scores, support automated enforcement decisions, or establish causal relationships from descriptive data.</p>
 
 <p>Incident counts should not be interpreted as population-adjusted risk rates. Higher activity may reflect greater traffic, exposure, reporting behavior, physical size, or operational visibility.</p>
+
+<h2></h2>
+<div align="center">
+
+### Author - **Hrishad Amre**  
+Business Analyst / Data Analyst / Product Analytics Portfolio Project  
+
+<a href="https://www.linkedin.com/in/hrishadamre/">LinkedIn</a> • 
+<a href="https://github.com/hrishadamre">GitHub</a> • 
+<a href="mailto:hrishad@umd.edu">Email</a>
+
+</div>
+
