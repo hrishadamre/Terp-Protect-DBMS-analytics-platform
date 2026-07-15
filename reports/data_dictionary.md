@@ -1,475 +1,782 @@
-# Data Dictionary
+# Terp Protect: Data Dictionary
 
 ## Purpose
 
-This data dictionary documents the planned raw, cleaned, and modeled fields for the Terp Protect DBMS and analytics project.
+This document defines the primary datasets, database fields, derived attributes, analytical categories, quality indicators, and calculation rules used in the Terp Protect public-safety analytics project.
 
-The project will begin with 2025 Daily Crime and Incident Logs, then add 2025 Arrest Logs, followed by CSA Logs and Uniform Crime Reports in later stages.
+The data dictionary is intended to help reviewers understand:
 
----
+- what each important field represents
+- which fields originate from public source records
+- which fields are created during cleaning or transformation
+- how incidents and arrests are connected
+- how dashboard metrics are calculated
+- how invalid or incomplete records are handled
 
-# Raw Tables
+The project uses publicly available University of Maryland Police Department incident and arrest records covering 2023 through 2025.
 
-## Table: raw_daily_incident_logs
-
-This table stores the raw incident records collected from UMPD Daily Crime and Incident Log pages.
-
-| Field Name | Description | Source Field | Notes |
-|---|---|---|---|
-| source_year | Year from source page | Page URL / year | Example: 2025 |
-| source_month | Month from source page | Page URL / month | Example: January |
-| case_number | UMPD case number | UMPD Case Number | Main incident identifier when available |
-| occurred_datetime_raw | Raw occurred date/time | Date Occurred | Needs datetime parsing |
-| reported_datetime_raw | Raw report date/time | Report Date | Needs datetime parsing |
-| crime_type_raw | Original incident type | Crime Type | Will be standardized |
-| disposition_raw | Original disposition | Disposition | Will be standardized and grouped |
-| location_raw | Original location text | General Location | Will be standardized and grouped |
-| source_url | URL used for collection | Web page URL | Useful for traceability |
-| scraped_at | Timestamp when data was collected | System generated | Useful for refresh tracking |
+> Field availability may vary between source files. The pipeline standardizes source records into a consistent analytical structure before loading them into the database.
 
 ---
 
-## Table: raw_arrest_logs
+## 1. Dataset Overview
 
-This table stores the raw arrest records collected from UMPD annual Arrest Log pages.
+The project contains two main record types:
 
-| Field Name | Description | Source Field | Notes |
-|---|---|---|---|
-| source_year | Year from source page | Page URL / year | Example: 2025 |
-| arrest_number | Unique arrest number | Arrest Number | Main arrest identifier |
-| arrested_datetime_raw | Raw arrest date/time | Arrested Date Time | Needs datetime parsing |
-| case_number | UMPD case number | UMPD Case Number | Used to join with incident logs when available |
-| age_raw | Raw age value | Age | May contain missing values |
-| race_raw | Raw race value | Race | May contain missing values |
-| sex_raw | Raw sex value | Sex | May contain missing values |
-| arrested_charge_raw | Original arrested charge text | Arrested Charge | May contain multiple long charge descriptions |
-| source_url | URL used for collection | Web page URL | Useful for traceability |
-| scraped_at | Timestamp when data was collected | System generated | Useful for refresh tracking |
-
----
-
-## Table: raw_csa_logs
-
-This table stores the raw records collected from UMPD Campus Security Authority Incident Log pages.
-
-| Field Name | Description | Source Field | Notes |
-|---|---|---|---|
-| source_year | Year from source page | Page URL / year | Example: 2025 |
-| source_month | Month from source page | Page URL / month | Example: January |
-| case_number | Case number when available | Case Number | Some records may show N/A |
-| occurred_datetime_raw | Raw occurred date/time | Occurred Date Time | Needs datetime parsing |
-| reported_datetime_raw | Raw report date/time | Report Date | Needs datetime parsing |
-| incident_type_raw | Original incident classification | Nature / Classification | Will be standardized |
-| disposition_raw | Original disposition/referral status | Disposition | Will be standardized and grouped |
-| location_raw | Original location text | General Location | Will be standardized and grouped |
-| source_url | URL used for collection | Web page URL | Useful for traceability |
-| scraped_at | Timestamp when data was collected | System generated | Useful for refresh tracking |
-
----
-
-## Table: raw_uniform_crime_reports
-
-This table stores aggregate monthly crime report values.
-
-| Field Name | Description | Source Field | Notes |
-|---|---|---|---|
-| source_year | Report year | Year | Example: 2025 |
-| source_month | Report month | Month | Example: January |
-| crime_category_raw | Original crime category | Crime category | Will be standardized |
-| offense_count_raw | Original offense count | Offense count | Needs numeric validation |
-| source_url | URL used for collection | Web page URL | Useful for traceability |
-| scraped_at | Timestamp when data was collected | System generated | Useful for refresh tracking |
-
----
-
-# Clean Tables
-
-## Table: clean_daily_incidents
-
-This table stores cleaned incident-level records from the Daily Crime and Incident Logs.
-
-| Field Name | Description |
+| Dataset | Description |
 |---|---|
-| incident_id | Internal generated incident ID |
-| case_number | Standardized UMPD case number |
-| occurred_datetime | Parsed occurred datetime |
-| reported_datetime | Parsed reported datetime |
-| report_delay_hours | Hours between occurred and reported datetime |
-| report_delay_days | Days between occurred and reported datetime |
-| crime_type | Standardized crime type |
-| crime_group | Broader incident group |
-| disposition | Standardized disposition |
-| disposition_group | Broader disposition category |
-| location_raw | Original location value |
-| location_group | Standardized location group |
-| year | Year from occurred date |
-| month | Month from occurred date |
-| month_name | Month name from occurred date |
-| weekday | Weekday from occurred date |
-| hour | Hour from occurred date |
-| is_weekend | Weekend indicator |
-| semester_period | Academic period grouping |
-| source_type | Daily Crime and Incident Log |
-| source_url | Original source page |
-| scraped_at | Data collection timestamp |
+| Incident records | Public safety incidents reported in the UMPD daily incident logs |
+| Arrest records | Public arrest records published by UMPD |
+
+The datasets are cleaned separately and later connected using normalized case-number fields where a reliable match is available.
 
 ---
 
-## Table: clean_arrests
+## 2. Incident Dataset
 
-This table stores cleaned arrest-level records from the Arrest Logs.
+### Incident Identifiers
 
-| Field Name | Description |
-|---|---|
-| arrest_id | Internal generated arrest ID |
-| arrest_number | Standardized arrest number |
-| case_number | Standardized UMPD case number |
-| arrest_datetime | Parsed arrest datetime |
-| age | Numeric age value |
-| age_group | Age group category |
-| race | Standardized race value |
-| sex | Standardized sex value |
-| raw_charge_text | Original arrest charge text |
-| clean_charge_text | Cleaned charge text |
-| charge_category | Primary charge category |
-| has_multiple_charges | Indicator for multiple charge descriptions |
-| arrest_year | Year from arrest date |
-| arrest_month | Month from arrest date |
-| arrest_month_name | Month name from arrest date |
-| arrest_weekday | Weekday from arrest date |
-| arrest_hour | Hour from arrest date |
-| source_type | Arrest Log |
-| source_url | Original source page |
-| scraped_at | Data collection timestamp |
+| Field | Type | Description |
+|---|---|---|
+| `incident_id` | Integer or text | Project-generated unique identifier for an incident record |
+| `case_number` | Text | UMPD case number associated with the incident |
+| `source_year` | Integer | Year of the public source file from which the record was collected |
+| `source_file` | Text | Name or reference of the source file used to load the record |
+| `source_url` | Text | Public webpage or file location from which the record originated, when retained |
 
----
+### Incident Date and Time Fields
 
-## Table: clean_csa_incidents
+| Field | Type | Description |
+|---|---|---|
+| `occurred_datetime` | Datetime | Standardized date and time when the incident occurred |
+| `reported_datetime` | Datetime | Standardized date and time when the incident was reported |
+| `occurred_date` | Date | Calendar date extracted from `occurred_datetime` |
+| `reported_date` | Date | Calendar date extracted from `reported_datetime` |
+| `occurred_year` | Integer | Calendar year when the incident occurred |
+| `occurred_month` | Integer | Numeric month when the incident occurred |
+| `occurred_month_name` | Text | Name of the occurrence month |
+| `occurred_weekday` | Text | Weekday name derived from the occurrence date |
+| `occurred_is_weekend` | Boolean or integer | Indicates whether the occurrence date falls on Saturday or Sunday |
+| `occurred_hour` | Integer | Hour of day extracted from the occurrence datetime |
+| `reported_year` | Integer | Calendar year when the incident was reported |
+| `reported_month` | Integer | Numeric month when the incident was reported |
+| `reported_month_name` | Text | Name of the reporting month |
+| `reported_weekday` | Text | Weekday name derived from the reported date |
+| `semester_period` | Text | Standardized academic-period category assigned to the occurrence date |
+| `occurred_semester_period` | Text | Academic-period value joined from the date dimension |
 
-This table stores cleaned records from Campus Security Authority Logs.
+### Incident Description Fields
 
-| Field Name | Description |
-|---|---|
-| csa_incident_id | Internal generated CSA incident ID |
-| case_number | Standardized case number when available |
-| has_valid_case_number | Indicator for whether case number is available |
-| occurred_datetime | Parsed occurred datetime |
-| reported_datetime | Parsed reported datetime |
-| report_delay_hours | Hours between occurred and reported datetime |
-| report_delay_days | Days between occurred and reported datetime |
-| incident_type | Standardized CSA incident type |
-| incident_group | Broader incident group |
-| disposition | Standardized disposition/referral status |
-| disposition_group | Broader disposition group |
-| location_raw | Original location value |
-| location_group | Standardized location group |
-| year | Year from occurred date |
-| month | Month from occurred date |
-| month_name | Month name from occurred date |
-| weekday | Weekday from occurred date |
-| hour | Hour from occurred date |
-| is_weekend | Weekend indicator |
-| semester_period | Academic period grouping |
-| source_type | CSA Log |
-| source_url | Original source page |
-| scraped_at | Data collection timestamp |
+| Field | Type | Description |
+|---|---|---|
+| `crime` | Text | Original or cleaned incident description from the source record |
+| `crime_type` | Text | Source crime type or standardized incident type |
+| `crime_group` | Text | Higher-level analytical category assigned to similar incident descriptions |
+| `location` | Text | Original or cleaned source location description |
+| `location_group` | Text | Standardized higher-level location category |
+| `disposition` | Text | Source case disposition or outcome text |
+| `disposition_group` | Text | Standardized analytical outcome category |
+| `narrative` | Text | Additional source description, when available |
 
 ---
 
-## Table: clean_uniform_crime_reports
+## 3. Standardized Incident Categories
 
-This table stores cleaned aggregate crime report data.
+### Crime Group
 
-| Field Name | Description |
+`crime_group` combines similar incident descriptions into broader analytical categories.
+
+Common categories include:
+
+| Crime Group | General Meaning |
 |---|---|
-| monthly_report_id | Internal generated monthly report ID |
-| year | Report year |
-| month | Report month |
-| month_name | Report month name |
-| year_month | Combined year-month field |
-| crime_category | Standardized crime category |
-| crime_group | Broader crime group |
-| offense_count | Numeric offense count |
-| source_type | Uniform Crime Report |
-| source_url | Original source page |
-| scraped_at | Data collection timestamp |
+| Medical / Welfare | Medical assistance, welfare checks, mental-health-related responses, and similar public-safety activity |
+| Theft / Property | Theft, stolen property, property loss, and related incidents |
+| Traffic / Vehicle | Traffic incidents, vehicle-related violations, crashes, and roadway events |
+| DUI / Impaired Driving | Driving under the influence or impaired-driving incidents |
+| Assault / Violence | Assault, threats, fighting, and related violent incidents |
+| Fraud / Financial Crime | Fraud, identity theft, scams, payment-related incidents, and financial offenses |
+| Drug / Controlled Substance | Drug possession, controlled-substance violations, and related incidents |
+| Alcohol-Related | Alcohol possession, alcohol violations, intoxication, and related incidents |
+| Burglary / Breaking and Entering | Burglary, unlawful entry, and breaking-and-entering incidents |
+| Vandalism / Property Damage | Destruction, defacement, or damage to property |
+| Harassment / Disorder | Harassment, disorderly conduct, disturbances, and similar behavior |
+| Trespassing | Unauthorized presence or entry |
+| Weapons | Weapons possession, display, or related violations |
+| Missing Person | Missing-person and related welfare records |
+| Other | Valid incidents not assigned to a major analytical category |
+| Unknown | Records with missing or unusable crime-category information |
+
+The categories are analytical groupings created for consistency. They do not replace official UMPD terminology.
 
 ---
 
-# Core Database Tables
+## 4. Location Groups
 
-## Table: fact_incident
+`location_group` standardizes detailed source location descriptions into broader analytical categories.
 
-Main fact table for UMPD Daily Crime and Incident Log records.
+Common groups include:
 
-| Field Name | Description |
+| Location Group | General Meaning |
 |---|---|
-| incident_id | Primary key |
-| case_number | UMPD case number |
-| occurred_date_id | Foreign key to dim_date |
-| reported_date_id | Foreign key to dim_date |
-| crime_type_id | Foreign key to dim_crime_type |
-| disposition_id | Foreign key to dim_disposition |
-| location_id | Foreign key to dim_location |
-| occurred_datetime | Full occurred timestamp |
-| reported_datetime | Full reported timestamp |
-| report_delay_hours | Time between occurrence and report |
-| report_delay_days | Delay in days |
-| source_type | Source dataset name |
+| Roadway / Street | Streets, intersections, roadways, highways, and traffic areas |
+| Residence / Housing | Residence halls, apartments, houses, and student housing |
+| Academic / Administrative | Classrooms, offices, libraries, laboratories, and administrative buildings |
+| Parking Area | Parking lots, parking garages, and vehicle-storage areas |
+| Outdoor / Campus Grounds | Walkways, fields, plazas, courtyards, and other outdoor campus spaces |
+| Retail / Commercial | Stores, restaurants, commercial facilities, and service locations |
+| Recreation / Athletics | Gyms, stadiums, athletic facilities, and recreational areas |
+| Transit / Transportation | Bus stops, transit centers, rail locations, and transportation facilities |
+| Medical Facility | Hospitals, clinics, health centers, and medical-service locations |
+| Other | Valid locations not assigned to a major standardized group |
+| Unknown | Missing, unclear, or unusable location information |
+
+Detailed source locations remain available for record-level inspection.
 
 ---
 
-## Table: fact_arrest
+## 5. Disposition Groups
 
-Main fact table for arrest records.
+`disposition_group` standardizes source case outcomes into consistent categories.
 
-| Field Name | Description |
+| Disposition Group | Description |
 |---|---|
-| arrest_id | Primary key |
-| arrest_number | Arrest number from UMPD log |
-| case_number | UMPD case number |
-| arrest_date_id | Foreign key to dim_date |
-| demographic_id | Foreign key to dim_demographic |
-| arrest_datetime | Full arrest timestamp |
-| age | Age at arrest |
-| raw_charge_text | Original charge text |
-| clean_charge_text | Cleaned charge text |
-| source_type | Source dataset name |
+| Closed / Cleared | Incident was closed, cleared, resolved, or administratively completed |
+| Pending / Active | Case remains open, pending, active, suspended, or under investigation |
+| Arrest-Related | Source disposition indicates arrest, custody, or a directly arrest-related outcome |
+| Summons / Warrant Issued | A citation, summons, warrant, or similar legal action was issued |
+| Unfounded | Report was determined to be unfounded or unsupported |
+| Other | Valid disposition not assigned to a primary analytical group |
+| Unknown | Missing or unusable disposition information |
+
+The `Arrest-Related` disposition group is derived from the incident record. It is different from incident-to-arrest record linkage.
 
 ---
 
-## Table: fact_csa_incident
+## 6. Reporting Delay Fields
 
-Main fact table for CSA-reported incidents.
+Reporting delay measures the elapsed time between occurrence and reporting.
 
-| Field Name | Description |
+| Field | Type | Description |
+|---|---|---|
+| `report_delay_hours` | Numeric | Elapsed hours between `occurred_datetime` and `reported_datetime` |
+| `report_delay_days` | Numeric | Elapsed reporting delay expressed in days, when included |
+| `delay_bucket` | Text | Standardized category describing the reporting-delay interval |
+| `has_valid_reporting_delay` | Boolean or integer | Indicates whether the delay is usable for analysis |
+
+The core calculation is:
+
+`reported_datetime - occurred_datetime`
+
+A reporting delay is valid when:
+
+- both datetime values are available
+- both datetime values can be parsed successfully
+- the reported datetime is not earlier than the occurrence datetime
+- the resulting delay is non-negative
+
+Records with invalid delay sequences remain available for review but are excluded from reporting-delay statistics.
+
+### Reporting Delay Buckets
+
+Common delay categories include:
+
+| Delay Bucket | Definition |
 |---|---|
-| csa_incident_id | Primary key |
-| case_number | Case number when available |
-| has_valid_case_number | Indicator for valid case number |
-| occurred_date_id | Foreign key to dim_date |
-| reported_date_id | Foreign key to dim_date |
-| crime_type_id | Foreign key to dim_crime_type |
-| disposition_id | Foreign key to dim_disposition |
-| location_id | Foreign key to dim_location |
-| occurred_datetime | Full occurred timestamp |
-| reported_datetime | Full reported timestamp |
-| report_delay_hours | Time between occurrence and report |
-| report_delay_days | Delay in days |
-| source_type | Source dataset name |
+| Within 1 Hour | Reported no more than one elapsed hour after occurrence |
+| 1–6 Hours | Reported more than one hour and no more than six hours after occurrence |
+| 6–24 Hours | Reported more than six hours and no more than 24 hours after occurrence |
+| 1–3 Days | Reported more than 24 hours and no more than three days after occurrence |
+| 3–7 Days | Reported more than three days and no more than seven days after occurrence |
+| Over 7 Days | Reported more than seven days after occurrence |
+| Invalid / Unknown | Delay could not be calculated reliably |
+
+`Reported Within 24 Hours` is based on elapsed time and does not require occurrence and reporting on the same calendar date.
 
 ---
 
-## Table: fact_monthly_crime_report
+## 7. Academic Period Fields
 
-Aggregate monthly crime reporting table.
+`semester_period` and `occurred_semester_period` assign incident dates to simplified academic periods.
 
-| Field Name | Description |
+Standardized values include:
+
+| Academic Period | Description |
 |---|---|
-| monthly_report_id | Primary key |
-| date_id | Foreign key to dim_date |
-| crime_type_id | Foreign key to dim_crime_type |
-| offense_count | Monthly offense count |
-| source_type | Source dataset name |
+| Spring Semester | Spring instructional period |
+| Summer Break | Summer academic and break period |
+| Fall Semester | Fall instructional period |
+| Winter Break | Winter academic recess period |
+| Unknown | Date could not be assigned reliably |
+
+Values such as `Summer`, `Summer Semester`, and `Summer Session` are standardized as `Summer Break`.
+
+Academic periods are simplified analytical groupings. They do not reproduce the exact University of Maryland academic calendar for every year.
+
+### Academic-Period Incident Rate
+
+The academic-period incident rate is calculated as:
+
+`Distinct incidents divided by calendar weeks represented in the academic period`
+
+The denominator includes the full represented calendar period, including dates with zero incidents.
+
+This reduces bias that would occur if the calculation counted only weeks containing recorded incidents.
 
 ---
 
-# Dimension Tables
+## 8. Date Dimension
 
-## Table: dim_date
+The database uses a date dimension to support consistent time-based analysis.
 
-| Field Name | Description |
-|---|---|
-| date_id | Primary key |
-| full_date | Date value |
-| year | Year |
-| quarter | Quarter |
-| month | Month number |
-| month_name | Month name |
-| weekday | Weekday name |
-| day_of_week_number | Day of week number |
-| is_weekend | Weekend indicator |
-| semester_period | Academic period grouping |
+Common date-dimension fields include:
 
----
+| Field | Type | Description |
+|---|---|---|
+| `date_key` | Integer or text | Surrogate or formatted key for a calendar date |
+| `full_date` | Date | Complete calendar date |
+| `year` | Integer | Calendar year |
+| `quarter` | Integer | Calendar quarter |
+| `month` | Integer | Numeric month |
+| `month_name` | Text | Calendar month name |
+| `week_of_year` | Integer | Calendar week number |
+| `weekday` | Text | Weekday name |
+| `weekday_number` | Integer | Numeric weekday order |
+| `is_weekend` | Boolean or integer | Indicates Saturday or Sunday |
+| `semester_period` | Text | Simplified academic-period classification |
 
-## Table: dim_crime_type
-
-| Field Name | Description |
-|---|---|
-| crime_type_id | Primary key |
-| crime_type | Standardized crime or incident type |
-| crime_group | Broader crime group |
-| source_type | Source where the crime type appears |
+The date dimension supports occurrence-date and reported-date analysis without repeatedly deriving calendar values.
 
 ---
 
-## Table: dim_disposition
+## 9. Arrest Dataset
 
-| Field Name | Description |
-|---|---|
-| disposition_id | Primary key |
-| disposition | Standardized disposition |
-| disposition_group | Broader disposition group |
-| is_arrest_related | Indicator for arrest-related dispositions |
-| is_pending | Indicator for pending/open cases |
-| is_closed | Indicator for closed cases |
+### Arrest Identifiers
 
----
+| Field | Type | Description |
+|---|---|---|
+| `arrest_id` | Integer or text | Project-generated unique identifier for an arrest record |
+| `arrest_number` | Text | Source arrest identifier |
+| `case_number` | Text | Case number associated with the arrest |
+| `normalized_case_number` | Text | Cleaned case number used for matching, when retained |
+| `source_year` | Integer | Year of the public source file |
+| `source_file` | Text | Name or reference of the source arrest file |
 
-## Table: dim_location
+### Arrest Date and Time Fields
 
-| Field Name | Description |
-|---|---|
-| location_id | Primary key |
-| location_raw | Original location text |
-| location_group | Standardized location group |
-| jurisdiction_group | UMD, Prince George’s County, Unknown, or other grouping if available |
-| is_on_campus | Indicator for on-campus locations when identifiable |
+| Field | Type | Description |
+|---|---|---|
+| `arrested_datetime` | Datetime | Standardized date and time of arrest |
+| `arrested_date` | Date | Calendar date extracted from the arrest datetime |
+| `arrested_year` | Integer | Calendar year of arrest |
+| `arrested_month` | Integer | Numeric month of arrest |
+| `arrested_month_name` | Text | Name of arrest month |
+| `arrested_weekday` | Text | Weekday of arrest |
+| `arrested_hour` | Integer | Hour of day when arrest occurred |
 
----
+### Arrest Description Fields
 
-## Table: dim_demographic
+| Field | Type | Description |
+|---|---|---|
+| `arrested_charge` | Text | Original or cleaned arrest charge description |
+| `charge_text` | Text | Standardized charge text, when separately retained |
+| `charge_category` | Text | Higher-level analytical category assigned to the charge |
+| `arrest_location` | Text | Source arrest location, when available |
+| `disposition` | Text | Arrest-record disposition, when available |
 
-| Field Name | Description |
-|---|---|
-| demographic_id | Primary key |
-| age_group | Age group category |
-| race | Standardized race value |
-| sex | Standardized sex value |
-
----
-
-## Table: dim_charge_category
-
-| Field Name | Description |
-|---|---|
-| charge_category_id | Primary key |
-| charge_category | Standardized charge category |
-| charge_subcategory | More specific charge grouping when available |
-| category_keywords | Keywords used for rule-based classification |
+The project focuses on aggregate arrest and charge analysis. Personally identifying fields are not required for dashboard analysis.
 
 ---
 
-# Bridge Tables
+## 10. Standardized Charge Categories
 
-## Table: bridge_arrest_charge
+`charge_category` groups similar arrest-charge descriptions.
 
-This table supports arrest records with multiple charge categories.
+Common categories include:
 
-| Field Name | Description |
+| Charge Category | General Meaning |
 |---|---|
-| arrest_id | Foreign key to fact_arrest |
-| charge_category_id | Foreign key to dim_charge_category |
-| charge_text | Charge text linked to the category |
+| DUI / Impaired Driving | Driving under the influence or impaired-driving charges |
+| Assault / Violence | Assault, threats, fighting, and related violent charges |
+| Theft / Property | Theft, stolen property, and related offenses |
+| Drug / Controlled Substance | Drug possession, distribution, and controlled-substance charges |
+| Alcohol-Related | Alcohol possession, intoxication, or related violations |
+| Traffic / Vehicle | Traffic, licensing, registration, and vehicle-related charges |
+| Fraud / Financial Crime | Fraud, identity theft, forgery, and related financial offenses |
+| Trespassing | Unauthorized entry or presence |
+| Weapons | Weapons possession or related charges |
+| Disorderly Conduct | Disorderly behavior, disturbance, or similar charges |
+| Burglary / Breaking and Entering | Burglary and unlawful-entry charges |
+| Vandalism / Property Damage | Damage or destruction of property |
+| Other | Valid charge not assigned to a major analytical category |
+| Unknown | Missing or unusable charge information |
+
+Charge categories are analytical classifications derived from charge-description keywords.
 
 ---
 
-# Planned Analytical Marts
+## 11. Incident-to-Arrest Matching
 
-## Table: mart_incident_outcomes
+Incident and arrest records are linked using cleaned case-number values.
 
-Used for dashboarding incident outcomes and dispositions.
+### Matching Logic
 
-| Field Name | Description |
-|---|---|
-| case_number | UMPD case number |
-| crime_type | Standardized crime type |
-| crime_group | Broader crime group |
-| disposition | Standardized disposition |
-| disposition_group | Broader disposition group |
-| location_group | Standardized location group |
-| occurred_datetime | Incident occurrence timestamp |
-| reported_datetime | Report timestamp |
-| report_delay_hours | Reporting delay |
-| year | Year |
-| month | Month |
-| weekday | Weekday |
-| hour | Hour |
-| has_matching_arrest | Whether case number appears in arrest log |
+A match generally requires:
 
----
+- a non-null incident case number
+- a non-null arrest case number
+- consistent normalization of spaces, punctuation, and text format
+- equality between normalized case numbers
 
-## Table: mart_arrest_conversion
+The matching process does not assume that unmatched records are unrelated. A match may be unavailable because of:
 
-Used to analyze which incidents result in arrests.
+- missing case numbers
+- inconsistent formatting
+- source-data differences
+- incomplete public record coverage
+- one case appearing in only one source dataset
 
-| Field Name | Description |
-|---|---|
-| case_number | UMPD case number |
-| incident_id | Incident ID |
-| arrest_id | Arrest ID when matched |
-| crime_type | Incident type |
-| charge_category | Arrest charge category |
-| incident_datetime | Occurred datetime |
-| arrest_datetime | Arrest datetime |
-| time_to_arrest_hours | Time between incident and arrest |
-| location_group | Standardized location |
-| disposition_group | Disposition group |
+### Match Fields
 
----
+| Field | Type | Description |
+|---|---|---|
+| `incident_id` | Integer or text | Identifier of the matched incident |
+| `arrest_id` | Integer or text | Identifier of the matched arrest |
+| `case_number` | Text | Shared case number used in the linkage |
+| `is_matched` | Boolean or integer | Indicates whether a valid match was created |
+| `arrest_count` | Integer | Number of arrest records connected to an incident, when aggregated |
 
-## Table: mart_reporting_delay
+### Key Arrest Measures
 
-Used to analyze reporting delays.
+#### All Cleaned Arrests
 
-| Field Name | Description |
-|---|---|
-| source_type | Source dataset |
-| case_number | Case number when available |
-| incident_type | Incident type |
-| location_group | Standardized location |
-| occurred_datetime | Occurrence datetime |
-| reported_datetime | Report datetime |
-| report_delay_hours | Reporting delay in hours |
-| report_delay_days | Reporting delay in days |
-| delay_bucket | Same day, 1-3 days, 4-7 days, over 7 days |
+The complete cleaned arrest-record population, regardless of whether records match the selected incident dataset.
 
----
+#### Linked Arrest Records
 
-## Table: mart_monthly_trends
+Arrest records connected to incidents in the selected incident population.
 
-Used for trend and forecasting analysis.
+#### Distinct Linked Arrest Cases
 
-| Field Name | Description |
-|---|---|
-| year_month | Year-month field |
-| year | Year |
-| month | Month |
-| source_type | Dataset source |
-| crime_group | Crime group |
-| incident_count | Count of incidents |
-| arrest_count | Count of arrests |
-| offense_count | Official monthly offense count when available |
+The number of unique case numbers represented in linked arrest records.
+
+#### Matched Incidents
+
+Distinct incidents with at least one linked arrest record.
+
+An incident is counted once even when it has multiple arrest records.
+
+#### Incident-to-Arrest Match Coverage
+
+Calculated as:
+
+`Distinct matched incidents divided by all distinct selected incidents`
+
+This measure does not represent the percentage of incidents that legally resulted in arrest. It represents successful linkage between the available public datasets.
+
+#### Linked Arrest Share
+
+Calculated as:
+
+`Linked arrest records divided by all cleaned arrest records`
+
+This measures the proportion of arrest records connected to the selected incident population.
 
 ---
 
-# Planned Target Variables for Modeling
+## 12. Data Quality Fields
 
-## Model 1: Incident Disposition Prediction
+The pipeline creates quality indicators to identify records that are complete and usable for analysis.
 
-| Field | Description |
-|---|---|
-| Target Variable | disposition_group |
-| Prediction Type | Classification |
-| Use Case | Predict administrative case outcome category for reporting support |
-| Ethical Note | This model does not predict individual behavior or crime risk |
+### Incident Quality Flags
 
-## Model 2: Incident Volume Forecasting
+| Field | Type | Description |
+|---|---|---|
+| `has_valid_case_number` | Boolean or integer | Indicates that the incident case number is present and usable |
+| `has_valid_occurred_datetime` | Boolean or integer | Indicates that the occurrence datetime parsed successfully |
+| `has_valid_reported_datetime` | Boolean or integer | Indicates that the reported datetime parsed successfully |
+| `has_valid_reporting_delay` | Boolean or integer | Indicates that the reporting delay is non-negative and analytically usable |
 
-| Field | Description |
-|---|---|
-| Target Variable | monthly_incident_count or weekly_incident_count |
-| Prediction Type | Time-series forecasting |
-| Use Case | Support aggregate-level operational planning |
-| Requirement | Needs multiple years of data |
+### Arrest Quality Flags
 
-## Model 3: Arrest Charge Text Classification
+| Field | Type | Description |
+|---|---|---|
+| `has_valid_arrest_number` | Boolean or integer | Indicates that the arrest identifier is present and usable |
+| `has_valid_case_number` | Boolean or integer | Indicates that the arrest case number is present and usable |
+| `has_valid_arrested_datetime` | Boolean or integer | Indicates that the arrest datetime parsed successfully |
+| `has_charge_text` | Boolean or integer | Indicates that usable arrest-charge text is available |
 
-| Field | Description |
-|---|---|
-| Target Variable | charge_category |
-| Prediction Type | Text classification |
-| Use Case | Convert long charge descriptions into structured reporting categories |
-| First Approach | Rule-based keyword classification |
-| Optional Approach | TF-IDF + Logistic Regression |
+A value of `1` generally represents a passed check, while `0` represents a failed or unavailable check.
+
+---
+
+## 13. Primary Field Check Pass Rate
+
+The dashboard calculates a weighted primary field-check pass rate.
+
+The calculation is:
+
+`Passed record-field checks divided by all evaluated record-field checks`
+
+Each evaluated record-field combination contributes once.
+
+For example, if four incident checks are applied to 5,659 incidents, the incident records contribute up to 22,636 evaluated record-field checks.
+
+The score measures configured data completeness and usability. It does not confirm that every source value is factually accurate.
+
+---
+
+## 14. Records Requiring Review
+
+A record is placed in the review panel when it fails at least one available primary quality check.
+
+Possible review reasons include:
+
+- missing case number
+- invalid occurrence datetime
+- invalid reported datetime
+- reported datetime earlier than occurred datetime
+- missing or unusable reporting delay
+- missing arrest number
+- invalid arrest datetime
+- missing charge text
+
+Review records are retained for transparency and are not automatically deleted.
+
+Invalid values may be excluded from specific calculations while the original record remains available in the database.
+
+---
+
+## 15. Core Analytical Views
+
+The database includes reusable SQL views that prepare data for analysis and dashboard use.
+
+### `vw_incident_detail`
+
+Provides a detailed incident-level analytical dataset containing:
+
+- incident identifiers
+- occurrence and reporting dates
+- date-dimension attributes
+- crime categories
+- location categories
+- disposition categories
+- reporting-delay fields
+- quality indicators
+
+### `vw_monthly_incident_trends`
+
+Provides monthly incident totals for trend and seasonal analysis.
+
+### `vw_crime_group_summary`
+
+Provides incident counts and shares by standardized crime group.
+
+### `vw_location_summary`
+
+Provides incident counts and shares by location or location group.
+
+### `vw_disposition_summary`
+
+Provides case-outcome totals and percentages.
+
+### `vw_reporting_delay_summary`
+
+Provides reporting-delay counts, distributions, and summary measures.
+
+### `vw_arrest_detail`
+
+Provides cleaned arrest records with charge categories and date attributes.
+
+### `vw_charge_category_summary`
+
+Provides arrest totals by standardized charge category.
+
+### `vw_incident_arrest_match`
+
+Provides incident-to-arrest linkage results using normalized case numbers.
+
+### `vw_demographic_summary`
+
+May provide aggregate demographic summaries when appropriate source fields are available.
+
+Demographic information is not used for individual profiling or predictive risk scoring.
+
+---
+
+## 16. Dashboard Metric Definitions
+
+### Total Incidents
+
+Count of distinct selected incident records.
+
+Preferred identifier:
+
+`incident_id`
+
+Fallback identifier:
+
+`case_number`
+
+### Total Arrest Records
+
+Count of distinct cleaned arrest records.
+
+Preferred identifier:
+
+`arrest_id`
+
+Fallback identifier:
+
+`arrest_number`
+
+### Closed or Cleared Share
+
+Distinct incidents categorized as `Closed / Cleared` divided by all distinct selected incidents.
+
+### Pending or Active Share
+
+Distinct incidents categorized as `Pending / Active` divided by all distinct selected incidents.
+
+### Arrest-Related Outcome Share
+
+Distinct incidents categorized as `Arrest-Related` divided by all distinct selected incidents.
+
+This is derived from incident disposition values.
+
+### Reported Within 24 Hours
+
+Valid incident records with a reporting delay of no more than 24 elapsed hours divided by all incident records with valid reporting-delay values.
+
+### Median Reporting Delay
+
+Median `report_delay_hours` among distinct incidents with valid, non-negative reporting delays.
+
+### P90 Reporting Delay
+
+The reporting-delay value at or below which 90% of valid incident records fall.
+
+### Weekend Share
+
+Distinct incidents occurring on Saturday or Sunday divided by all distinct selected incidents with valid occurrence dates.
+
+### Incident-to-Arrest Match Coverage
+
+Distinct selected incidents with at least one linked arrest divided by all distinct selected incidents.
+
+### Linked Arrest Share
+
+Linked arrest records divided by all cleaned arrest records.
+
+### Primary Field Check Pass Rate
+
+Passed configured record-field checks divided by all evaluated record-field checks.
+
+---
+
+## 17. Count and Percentage Rules
+
+To avoid duplicate counting, dashboard measures use distinct record identifiers wherever possible.
+
+### Incident Measures
+
+Incident calculations generally use one row per:
+
+`incident_id`
+
+When `incident_id` is unavailable, the project may use:
+
+`case_number`
+
+### Arrest Measures
+
+Arrest calculations generally use one row per:
+
+`arrest_id`
+
+When `arrest_id` is unavailable, the project may use:
+
+`arrest_number`
+
+### Percentage Denominators
+
+Percentages use the complete eligible record population for the metric.
+
+Examples:
+
+- outcome shares use all selected incidents
+- delay shares use incidents with valid reporting delays
+- location composition uses all selected incidents within each displayed location group
+- crime-group outcome composition uses all selected incidents within each displayed crime group
+- arrest-linkage coverage uses all selected incidents
+
+---
+
+## 18. Minimum Sample Thresholds
+
+Some comparative charts exclude groups with very small record counts.
+
+The standard minimum threshold used in major group comparisons is generally:
+
+`20 records`
+
+This threshold is applied to:
+
+- location-group composition comparisons
+- crime-group outcome comparisons
+- reporting-delay comparisons by group
+
+The threshold reduces unstable percentages or medians based on very small samples.
+
+It is an analytical display rule and does not remove the underlying records from the database.
+
+---
+
+## 19. Seasonal and Chronological Time Definitions
+
+### Seasonal Calendar-Month View
+
+Combines the same month across all selected years.
+
+Example:
+
+- all January incidents are combined
+- all February incidents are combined
+- all March incidents are combined
+
+This view identifies recurring seasonal patterns.
+
+### Chronological Year-Month View
+
+Keeps each month and year separate.
+
+Example:
+
+- January 2023
+- February 2023
+- January 2024
+- February 2024
+
+This view identifies changes over time.
+
+Chart titles specify whether the analysis is seasonal or chronological.
+
+---
+
+## 20. Source Year vs. Occurrence Year
+
+These fields should not be treated as interchangeable.
+
+### `source_year`
+
+Represents the year assigned to the downloaded public source file.
+
+### `occurred_year`
+
+Represents the calendar year extracted from the incident occurrence datetime.
+
+A source file may contain a record whose occurrence date belongs to a different calendar year.
+
+The dashboard uses the appropriate field depending on whether the analysis concerns:
+
+- source-file coverage
+- incident occurrence timing
+- chronological trends
+
+---
+
+## 21. Missing and Unknown Values
+
+Missing source values are handled according to analytical purpose.
+
+Typical rules include:
+
+- preserve the original source record
+- standardize blank text as null where appropriate
+- assign `Unknown` only when a category is required for grouping
+- exclude invalid values from calculations that require valid data
+- retain flagged records in the review panel
+- avoid silently replacing uncertain values with assumed information
+
+`Unknown` means that the available source value could not be classified reliably.
+
+`Other` means that a valid source value exists but does not fit a major standardized category.
+
+---
+
+## 22. Responsible Use of Fields
+
+The data model is designed for aggregate public-safety analysis.
+
+Appropriate uses include:
+
+- descriptive reporting
+- operational workload analysis
+- trend identification
+- data-quality review
+- reporting-delay analysis
+- record-linkage evaluation
+- educational database analysis
+
+The data should not be used for:
+
+- individual behavioral prediction
+- automated enforcement decisions
+- profiling individuals or demographic groups
+- assigning personal risk scores
+- causal conclusions based only on descriptive associations
+
+---
+
+## 23. Important Interpretation Notes
+
+### Incident Volume Is Not a Risk Rate
+
+Higher incident counts may reflect:
+
+- greater population exposure
+- increased traffic
+- larger physical areas
+- longer operating hours
+- greater police visibility
+- stronger reporting activity
+
+### Arrest-Related Outcomes Are Not the Same as Linked Arrests
+
+`Arrest-Related` is derived from incident disposition.
+
+Linked arrests are created by joining incident and arrest records.
+
+The two measures may differ.
+
+### Unmatched Records Are Not Proof of No Arrest
+
+A record may remain unmatched because identifiers are missing, inconsistent, or unavailable in the public datasets.
+
+### Category Assignments Are Analytical
+
+Crime, location, disposition, and charge categories are created to support consistent analysis.
+
+They do not replace official terminology or legal definitions.
+
+### Reporting Delay Is Based on Available Datetimes
+
+The calculated delay depends on the accuracy and completeness of the published occurrence and reporting timestamps.
+
+---
+
+## Conclusion
+
+This data dictionary documents the core structure and analytical rules used throughout Terp Protect.
+
+It provides a consistent reference for:
+
+- database tables
+- analytical views
+- standardized categories
+- dashboard measures
+- quality checks
+- record-linkage logic
+- responsible interpretation
+
+Together, these definitions ensure that the dashboard, SQL queries, reports, and project documentation use consistent terminology and calculation rules.
