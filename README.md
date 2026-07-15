@@ -55,11 +55,10 @@ Faster analysis, clearer reporting, consistent definitions, and improved visibil
 
 <h2>Dashboard Preview</h2>
 
-<p align="center">
-  <img src="visuals/UI screenshots/dashboard_capture_20260714_182842/01_command_center.png" width="95%" alt="Terp Protect dashboard preview" />
+ <p align="center">
+  <img src="" width="95%" alt="Terp Protect dashboard preview" />
 </p>
 
- 
 
 <h2>Platform Capabilities</h2>
 
